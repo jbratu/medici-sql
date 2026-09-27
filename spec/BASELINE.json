@@ -1,0 +1,116 @@
+{
+  "format": "medici-sql/test-results/v1",
+  "generatedAt": "2026-09-27T22:38:17.726Z",
+  "perFile": {
+    "spec/alias-probe.spec.ts": {
+      "passed": 1,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/balance.spec.ts": {
+      "passed": 5,
+      "failed": 4,
+      "pending": 0
+    },
+    "spec/book.spec.ts": {
+      "passed": 53,
+      "failed": 2,
+      "pending": 1
+    },
+    "spec/collectionAdapter.spec.ts": {
+      "passed": 26,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/compat-core-a.spec.ts": {
+      "passed": 19,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/compat-core-b.spec.ts": {
+      "passed": 16,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/constructKey.spec.ts": {
+      "passed": 3,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/extractObjectIdKeysFromSchema.spec.ts": {
+      "passed": 1,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/filterTranslator.spec.ts": {
+      "passed": 80,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/filterTranslator.sqlite.spec.ts": {
+      "passed": 22,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/fpPrecision.spec.ts": {
+      "passed": 0,
+      "failed": 3,
+      "pending": 0
+    },
+    "spec/handleVoidMemo.spec.ts": {
+      "passed": 6,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/parseBalanceQuery.spec.ts": {
+      "passed": 22,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/parseDateField.spec.ts": {
+      "passed": 6,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/parseFilterQuery.spec.ts": {
+      "passed": 17,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/safeSetKeyToMetaObject.spec.ts": {
+      "passed": 5,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/scaffold.spec.ts": {
+      "passed": 10,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/setTransactionSchema.spec.ts": {
+      "passed": 0,
+      "failed": 0,
+      "pending": 1
+    },
+    "spec/transaction.spec.ts": {
+      "passed": 17,
+      "failed": 0,
+      "pending": 0
+    },
+    "spec/xacid.spec.ts": {
+      "passed": 1,
+      "failed": 11,
+      "pending": 0
+    }
+  },
+  "totals": {
+    "passed": 310,
+    "failed": 20,
+    "pending": 2,
+    "executed": 330
+  },
+  "quarantined": [
+    "spec/book.spec.ts :: should save all transactions in bulk and mitigate mongodb 'insertedIds' bug",
+    "spec/setTransactionSchema.spec.ts :: should return full ledger with _journal2"
+  ]
+}

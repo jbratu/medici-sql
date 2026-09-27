@@ -46,11 +46,7 @@ export class Query<T = any> {
 
   private _lean = false;
 
-  constructor(
-    private host: QueryHost,
-    private op: "find" | "findOne" | "deleteMany",
-    private filter: IAnyObject
-  ) {}
+  constructor(private host: QueryHost, private op: "find" | "findOne" | "deleteMany", private filter: IAnyObject) {}
 
   sort(spec: SortSpec): this {
     this._sortSpec = spec;

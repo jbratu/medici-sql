@@ -18,6 +18,11 @@ const META_JSON = '{"clientId":"12345"}';
 
 describe("scaffold (ITD-90)", () => {
   before(async () => {
+    // This suite pins in-memory (it asserts the URL); re-assert it here
+    // because the vendored-suite bootstrap (spec/helper/MongoDB.spec.ts,
+    // ITD-95) re-asserts the file-backed URL in the root before().
+    process.env.MEDICI_SQL_DATABASE_URL = "file::memory:";
+    await disconnectPrisma();
     await resetDatabase();
   });
 

@@ -1,0 +1,102 @@
+{
+  "format": "medici-sql/spec-upstream-provenance/v1",
+  "upstream": {
+    "remote": "https://github.com/flash-oss/medici",
+    "sha": "54fa40b6df5bc43e7b290b4805a1ef3ddc256861",
+    "ref": "master",
+    "version": "v7.3.0-1-g54fa40b"
+  },
+  "files": {
+    "spec/balance.spec.ts": {
+      "sha256": "9282e21b8efb67169d93dc9ba6e64ca76e32b0a8881b258be02a0642ba96a707",
+      "itCount": 9,
+      "mode": "upstream"
+    },
+    "spec/book.spec.ts": {
+      "sha256": "7b8a80a12bcfd17e2315432d7f0bbf0749cb0e318529148cbcf71b8caf8dd267",
+      "itCount": 56,
+      "mode": "upstream"
+    },
+    "spec/constructKey.spec.ts": {
+      "sha256": "b491a712cd6499be545150d05108851e737fef74b2c85cd4048362b6059be1d0",
+      "itCount": 3,
+      "mode": "upstream"
+    },
+    "spec/extractObjectIdKeysFromSchema.spec.ts": {
+      "sha256": "a52fe2d555e1f7219d34fb4847e39afed61f64891c7df028349fca1e524a2b78",
+      "itCount": 1,
+      "mode": "upstream"
+    },
+    "spec/fpPrecision.spec.ts": {
+      "sha256": "4500fb7d89dac8037a754114b680509a514f11af83b49ff2d19f245d7468fcbe",
+      "itCount": 3,
+      "mode": "upstream"
+    },
+    "spec/handleVoidMemo.spec.ts": {
+      "sha256": "4b63f07a46e25144076f704fc86c5fefc89834e0b69815457e3ade4286452e7c",
+      "itCount": 1,
+      "mode": "upstream"
+    },
+    "spec/helper/delay.ts": {
+      "sha256": "0a7a86288351e2f063a0d7ee46a50f410e1c8ddda314288674742aa359423278",
+      "itCount": 0,
+      "mode": "upstream"
+    },
+    "spec/helper/MongoDB.spec.ts": {
+      "sha256": "8e7d8569385b0783f78edd493b019bc451a9686b81281aacfbac16cde08a7745",
+      "itCount": 0,
+      "mode": "replaced"
+    },
+    "spec/helper/transactionSchema.ts": {
+      "sha256": "6cb6a5c4daa5a8551d5eb6cd6618aa6f5bf01c723d41286617192f50954e7836",
+      "itCount": 0,
+      "mode": "upstream"
+    },
+    "spec/index.spec.ts": {
+      "sha256": "0b5ff5ce9626cb98124543ed6043f67116bd77784d827089cb344e428daf8d31",
+      "itCount": 0,
+      "mode": "upstream"
+    },
+    "spec/parseBalanceQuery.spec.ts": {
+      "sha256": "ab0f0ab600f81d6ad7c3e3d93fc0715532dcf9fe70e7f17ca826a81f8f5f84d1",
+      "itCount": 22,
+      "mode": "upstream"
+    },
+    "spec/parseDateField.spec.ts": {
+      "sha256": "e3f5fab4c0dc83b2a82698b3ba9ac50dddfcd4728dc0679a41c84e0e9278b486",
+      "itCount": 6,
+      "mode": "upstream"
+    },
+    "spec/parseFilterQuery.spec.ts": {
+      "sha256": "834534be1645fa37a5e8fad3ef65a1836efb81086c5d0badc16b3146878e1814",
+      "itCount": 17,
+      "mode": "upstream"
+    },
+    "spec/safeSetKeyToMetaObject.spec.ts": {
+      "sha256": "2d2617eb122a5365c6f8e054c7bf3a92c1fe215806b781ffa0680966ac98182c",
+      "itCount": 5,
+      "mode": "upstream"
+    },
+    "spec/setTransactionSchema.spec.ts": {
+      "sha256": "72b8698dda3518488fbb9b59dfbbea97542dc901ec2d829959bd8fe612f6e178",
+      "itCount": 1,
+      "mode": "upstream"
+    },
+    "spec/types/medici.spec-d.ts": {
+      "sha256": "e3206f13e45c7ae387bf0b60b3d3d1e0b1e5285adf4a3d43b0f42649d733ebdd",
+      "itCount": 0,
+      "mode": "upstream"
+    },
+    "spec/xacid.spec.ts": {
+      "sha256": "b7678a5b165829f8f8950db8b0d9963fe59f32193fbb4111ef481247865f3fa3",
+      "itCount": 12,
+      "mode": "upstream"
+    }
+  },
+  "replaced": {
+    "spec/helper/MongoDB.spec.ts": {
+      "replacementSha256": "f4f91f18b78f86fe80e9071a5b029bae76785960ffddbe882ad2969656558c39",
+      "reason": "Tier C - content replaced, path preserved (TEST_COMPAT_MATRIX.md row; load-bearing: spec/book.spec.ts:13, spec/index.spec.ts)"
+    }
+  }
+}

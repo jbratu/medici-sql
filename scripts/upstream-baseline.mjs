@@ -94,6 +94,7 @@ try {
   writeProvenance(newSha, rows);
   process.stdout.write(`regenerated spec/UPSTREAM_PROVENANCE.md (${Object.keys(rows).length} files, ${Object.values(rows).reduce((a, r) => a + r.itCount, 0)} it() total)\n`);
 
+
   // M17: regenerate the src verbatim pin-integrity table (M17) from the
   // worktree AFTER re-copy + re-apply, so ported files store their ported hash.
   const srcRows = {};
@@ -103,27 +104,26 @@ try {
   writeSrcProvenance(newSha, srcRows);
   process.stdout.write(`regenerated upstream/SRC_PROVENANCE.md (${Object.keys(srcRows).length} files)\n`);
 
-  npmCiIfStale(tmp);
-  const dts = buildUpstreamTypes(tmp);
-  const surface = {
-    format: SURFACE_FORMAT,
-    upstream: { remote: UPSTREAM_REMOTE, sha: newSha, ref: 'upstream/master' },
-    source: 'types/index.d.ts (dts-bundle-generator from src/index.ts, upstream package.json "build:types")',
-    exports: extractSurface(dts),
+  // Machine-readable sidecar (ITD-95 hash guard, QA M2). Preserves the
+  // `replaced` section and per-file `mode` flags across re-baselines so the
+  // Tier C content-replaced file stays tracked with its replacement hash.
+  const sidePath = path.join(ROOT, 'spec', 'UPSTREAM_PROVENANCE.json');
+  const oldSide = existsSync(sidePath) ? JSON.parse(readFileSync(sidePath, 'utf8')) : {};
+  const side = {
+    format: 'medici-sql/spec-upstream-provenance/v1',
+    upstream: {
+      remote: UPSTREAM_REMOTE,
+      sha: newSha,
+      ref: 'master',
+      version: oldSide.upstream?.version ?? null,
+    },
+    files: Object.fromEntries(
+      Object.entries(rows).map(([rel, r]) => [
+        rel,
+        { sha256: r.sha256, itCount: r.itCount, mode: oldSide.files?.[rel]?.mode ?? 'upstream' },
+      ]),
+    ),
+    replaced: oldSide.replaced ?? {},
   };
-  writeFileSync(path.join(ROOT, 'upstream', 'api-surface.json'), JSON.stringify(surface, null, 2) + '\n');
-  process.stdout.write(`regenerated upstream/api-surface.json (${surface.exports.length} exports)\n`);
-
-  writeFileSync(pinPath, newSha + '\n');
-  process.stdout.write(`updated upstream/PINNED_SHA: ${oldPin ? `${short(oldPin)} -> ${short(newSha)}` : short(newSha)}\n`);
-
-  process.stdout.write('\nReminder: triage any unclassified specs into TEST_COMPAT_MATRIX.md (tier + rationale) BEFORE committing.\n');
-  process.stdout.write('Commit matrix + verbatim copies + provenance + api-surface.json + PINNED_SHA in ONE commit.\n\n');
-  process.stdout.write('Running upstream:check --full against the new SHA...\n\n');
-  const exitCode = await runCheck({ ref: newSha, full: true });
-  process.exit(exitCode);
-} catch (err) {
-  die(`baseline failed: ${err.stack || err.message}`);
-} finally {
-  rmSync(tmp, { recursive: true, force: true });
-}
+  writeFileSync(sidePath, JSON.stringify(side, null, 2) + '\n');
+  process.stdout.write(`regenerated spec/UPSTREAM_PROVENANCE.json (${Object.keys(side.files).length} files, ${Object.keys(side.replaced).length} replaced)\n`);

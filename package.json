@@ -12,14 +12,18 @@
     "build:node": "tsc -p . && tsc-alias -p tsconfig.json && node scripts/copy-prisma-client.mjs",
     "build:types": "dts-bundle-generator -o ./types/index.d.ts ./src/index.ts --project ./tsconfig.types.json --no-check",
     "clean": "rimraf ./build && rimraf ./types",
+<<<<<<< HEAD
     "lint": "eslint ./spec ./src && node scripts/upstream-check.mjs --pin-only",
+=======
+    "lint": "eslint ./spec ./src && node scripts/spec-integrity.mjs && node scripts/upstream-check.mjs --pin-only",
+>>>>>>> b696e71 (test(ITD-95): Vendored upstream spec suite — harness, matrix, provenance, guards)
     "lint:fix": "eslint --fix ./spec ./src",
     "prettier": "prettier '**/*.ts' --check",
     "prettier:fix": "prettier '**/*.ts' --write",
     "test": "npm run test:code && npm run test:types",
-    "test:code": "ts-mocha --paths --recursive './spec/*.ts' --preserve-symlinks",
+    "test:code": "ts-mocha --paths --require ./test/mocha-setup.ts --recursive './spec/*.ts' --preserve-symlinks",
     "test:types": "tsd",
-    "test:coverage": "npm run clean && nyc --reporter html ts-mocha --paths --recursive './spec/**/*.spec.ts'",
+    "test:coverage": "npm run clean && nyc --reporter html ts-mocha --paths --require ./test/mocha-setup.ts --recursive './spec/**/*.spec.ts'",
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:reset": "prisma db push --force-reset",

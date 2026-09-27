@@ -48,6 +48,7 @@
   "overrides": [
     {
       "files": [
+        "spec/book.spec.ts",
         "spec/constructKey.spec.ts",
         "spec/extractObjectIdKeysFromSchema.spec.ts",
         "spec/filterTranslator.spec.ts",
@@ -58,7 +59,8 @@
         "spec/safeSetKeyToMetaObject.spec.ts"
       ],
       "rules": {
-        "import/namespace": "off"
+        "import/namespace": "off",
+        "import/named": "off"
       }
     }
   ]

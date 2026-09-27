@@ -12,6 +12,9 @@ coverage/
 *.db-wal
 *.db-shm
 *.sqlite
+# Per-run results, written by test/mocha-setup.ts; spec/BASELINE.json is the
+# checked-in snapshot of a deliberate run (ITD-95).
+spec/test-results.json
 src/generated/
 upstream-check.report.json
 upstream-check-report.md
