@@ -1,0 +1,127 @@
+// Medici SQL port — Prisma data model (ITD-90).
+//
+// Four models mirror the four upstream Mongo collections. Table names match
+// the collection names so a future data migration is mechanical. Prisma does
+// not allow field names with a leading underscore, so Mongo's underscore
+// fields carry @map to the Mongo column name.
+//
+// NOTE: the executable DDL for the programmatic reset path lives in
+// src/database/schema.ts. Keep it in sync with this file via
+// `npm run db:sync-ddl`.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "sqlite"
+  // No `url` here: Prisma 7 forbids it in the schema (P1012). The Prisma CLI
+  // reads prisma.config.ts; the runtime client gets its URL and the
+  // better-sqlite3 driver adapter from src/database/client.ts.
+}
+
+// Upstream collection: medici_transactions (src/models/transaction.ts)
+model Transaction {
+  id              String    @id @map("_id")
+  credit          Float
+  debit           Float
+  meta            String?
+  datetime        DateTime
+  accountPath     String    @map("account_path")
+  accounts        String
+  book            String
+  memo            String
+  journal         String    @map("_journal")
+  timestamp       DateTime
+  voided          Boolean?
+  voidReason      String?   @map("void_reason")
+  originalJournal String?   @map("_original_journal")
+  // account_path: upstream stores a string[]. The JSON array is kept in
+  // `accountPath` (TEXT) and the first three segments are denormalized into
+  // accountPath0/1/2 so the filters emitted by parseAccountField
+  // (account_path.0/.1/.2) become plain indexed column predicates. Paths
+  // beyond index 2 (maxAccountPath raised by a caller) fall back to a JSON
+  // predicate — documented limitation, see docs/PORTING-NOTES.md.
+  accountPath0    String?   @map("account_path_0")
+  accountPath1    String?   @map("account_path_1")
+  accountPath2    String?   @map("account_path_2")
+
+  @@index([journal])
+  @@index([book, accounts, datetime])
+  @@index([book, accountPath0, accountPath1, accountPath2, datetime])
+  @@map("medici_transactions")
+}
+
+// Upstream collection: medici_journals (src/models/journal.ts)
+model Journal {
+  id           String   @id @map("_id")
+  datetime     DateTime
+  memo         String   @default("")
+  // TEXT JSON array of 24-char lowercase-hex ObjectId strings.
+  transactions String   @default("[]") @map("_transactions")
+  book         String
+  voided       Boolean?
+  voidReason   String?  @map("void_reason")
+
+  @@map("medici_journals")
+}
+
+// Upstream collection: medici_locks (src/models/lock.ts)
+model Lock {
+  id        String   @id @map("_id")
+  book      String
+  account   String
+  updatedAt DateTime
+  version   Int      @default(0) @map("__v")
+
+  // Upstream declares (account, book) unique; Book.writelockAccounts relies
+  // on upsert-by-that-key.
+  @@unique([account, book])
+  @@map("medici_locks")
+  // Upstream TTL index (updatedAt, expireAfterSeconds: 86400) is a
+  // documented no-op in the port — no test depends on expiry firing and no
+  // sweeper is built. The column stays. See docs/PORTING-NOTES.md.
+}
+
+// Upstream collection: medici_balances (src/models/balance.ts)
+model Balance {
+  id          String   @id @map("_id")
+  // Hex-encoded TEXT: 20-byte sha1 digest as 40 hex chars (QA M9). SQLite
+  // string functions truncate at NUL and ~7.7% of digests contain a 0x00
+  // byte. Encode/decode lives in the collection adapter; hashKey() itself
+  // stays byte-identical to upstream.
+  key         String
+  rawKey      String
+  book        String
+  account     String?
+  transaction String
+  // JSON string (JSON.stringify of the meta object), not structured JSON.
+  // book.spec.ts:373 asserts the stored value equals the exact stringified
+  // form.
+  meta        String
+  balance     Float
+  notes       Int      @default(0)
+  createdAt   DateTime
+  expireAt    DateTime
+
+  @@index([key])
+  @@map("medici_balances")
+  // Upstream TTL index (expireAt, expireAfterSeconds: 0) is a documented
+  // no-op in the port. The column stays. See docs/PORTING-NOTES.md.
+}
+
+// Single-row monotonic id source for transaction _ids (ITD-89 amendment A,
+// spike/FINDINGS.md "cross-process monotonicity"). Allocated inside the write
+// transaction: id = seconds || instance || counter. Journal / lock / balance
+// _ids stay client-side. `instance` is 5 random bytes fixed at database
+// creation. Counter overflow needs >16.7M ids in one second — documented
+// bound, not engineered around.
+model IdSequence {
+  id       Int    @id @default(1)
+  seconds  Int
+  counter  Int    @default(0)
+  instance Bytes
+
+  @@map("medici_id_sequence")
+}

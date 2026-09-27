@@ -1,0 +1,20 @@
+{
+  "display": "Node 16",
+  "compilerOptions": {
+    "lib": ["es2021"],
+    "module": "commonjs",
+    "target": "es2021",
+    "outDir": "build",
+    "strict": true,
+    "skipLibCheck": true,
+    "sourceMap": false,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "mongoose": ["src/compat/mongoose.ts"],
+      "mongodb": ["src/compat/mongodb.ts"]
+    }
+  },
+  "include": ["src", "spec"],
+  "exclude": ["src/generated", "spike"]
+}

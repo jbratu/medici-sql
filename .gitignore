@@ -2,7 +2,15 @@ node_modules/
 types/
 build/
 coverage/
+.nyc_output/
+.idea
+.DS_Store
+.npmrc
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
+src/generated/
 upstream-check.report.json
 upstream-check-report.md
+*.tgz

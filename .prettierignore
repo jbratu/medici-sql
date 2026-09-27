@@ -1,0 +1,20 @@
+node_modules/
+build/
+types/
+src/generated/
+spike/
+coverage/
+# Verbatim upstream copies — byte-identical by contract (upstream/VERBATIM_FILES.txt).
+# Do NOT reformat: the drift monitor (npm run upstream:check, class B) diffs them
+# against the pinned upstream SHA, and one upstream file at the pin is not
+# prettier-clean (src/helper/parse/parseBalanceQuery.ts).
+src/Book.ts
+src/Entry.ts
+src/IAnyObject.ts
+src/errors/
+src/helper/parse/
+src/helper/addReversedTransactions.ts
+src/helper/flattenObject.ts
+src/helper/handleVoidMemo.ts
+src/helper/isPrototypeAttribute.ts
+src/helper/safeSetKeyToMetaObject.ts
