@@ -1,5 +1,5 @@
 import * as crypto from "crypto";
-import { connectPrisma, getPrismaClient } from "./client";
+import { connectPrisma, currentSingletonUrl, getPrismaClient } from "./client";
 import type { PrismaClient } from "../generated";
 
 /**
@@ -139,4 +139,65 @@ export async function resetDatabase(prisma: PrismaClient = getPrismaClient()): P
     await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS ${table}`);
   }
   await createSchema(prisma);
+}
+
+/**
+ * Idempotent schema bootstrap (ITD-94) for the "no initialize() required"
+ * contract: fresh database -> create; complete database -> no-op (reseeds
+ * the medici_id_sequence row only if missing); partially created database
+ * -> treated as corrupt and recreated from the embedded DDL.
+ */
+export async function ensureSchema(prisma?: PrismaClient): Promise<void> {
+  // An explicit client (custom URL) is connected by its caller; only the
+  // default path needs connectPrisma() to apply the port pragmas.
+  if (!prisma) {
+    await connectPrisma();
+    prisma = getPrismaClient();
+  }
+  const rows = (await prisma.$queryRawUnsafe<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'medici_%'"
+  )) as unknown as { name: string }[];
+  const present = new Set(rows.map((row) => row.name));
+  if (TABLES.some((table) => !present.has(table))) {
+    await resetDatabase(prisma);
+    return;
+  }
+  const countRows = (await prisma.$queryRawUnsafe<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM medici_id_sequence"
+  )) as unknown as { count: number }[];
+  if (!countRows.length || Number(countRows[0].count) === 0) {
+    await prisma.$executeRawUnsafe(
+      "INSERT INTO medici_id_sequence (id, seconds, counter, instance) VALUES (1, 0, 0, ?)",
+      crypto.randomBytes(5)
+    );
+  }
+}
+
+let autoEnsurePromise: Promise<void> | undefined;
+
+/**
+ * Process-level lazy bootstrap for the "`initialize()` is optional"
+ * contract (ITD-94): the first collection/transaction operation connects
+ * (port pragmas) and creates the schema if absent — so importing `Book`
+ * and using it with the default configuration works with no explicit
+ * call, matching upstream. `initialize()` is the explicit, up-front
+ * equivalent. Cached: the check runs once per process (or once after a
+ * failure); it targets the current singleton URL so an earlier
+ * `initialize({ databaseUrl })` is never shadowed by the default.
+ */
+export function ensureSchemaLazy(): Promise<void> {
+  if (!autoEnsurePromise) {
+    autoEnsurePromise = (async () => {
+      const url = currentSingletonUrl();
+      if (url == null) {
+        await ensureSchema();
+      } else {
+        await connectPrisma(url);
+        await ensureSchema(getPrismaClient(url));
+      }
+    })().catch(() => {
+      autoEnsurePromise = undefined;
+    });
+  }
+  return autoEnsurePromise;
 }

@@ -62,7 +62,13 @@ export function currentSingletonUrl(): string | undefined {
  * (connection.connect does).
  */
 export function getPrismaClient(url?: string): PrismaClient {
-  const target = url ?? databaseUrl();
+  // No-arg means "the current client": follow the existing singleton when
+  // one exists (it may point at a non-default URL after
+  // initialize({ databaseUrl })), else fall back to env/default. A no-arg
+  // call must never silently flip the singleton back to the default URL —
+  // that is how internal connectPrisma() calls inside createSchema /
+  // resetDatabase used to steal the explicit connection (ITD-94).
+  const target = url ?? currentSingletonUrl() ?? databaseUrl();
   if (!client || clientUrl !== target) {
     const adapter = new PrismaBetterSqlite3({ url: target, timeout: ADAPTER_TIMEOUT_MS });
     client = new PrismaClient({ adapter });
@@ -76,7 +82,8 @@ export function getPrismaClient(url?: string): PrismaClient {
  * Idempotent: the pragma sequence runs once per process per client.
  */
 export function connectPrisma(url?: string): Promise<PrismaClient> {
-  const targetUrl = url ?? databaseUrl();
+  // See getPrismaClient: a no-arg call follows the current singleton.
+  const targetUrl = url ?? currentSingletonUrl() ?? databaseUrl();
   const prisma = getPrismaClient(targetUrl);
   if (!connectPromise) {
     connectPromise = (async () => {

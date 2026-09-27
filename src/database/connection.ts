@@ -3,6 +3,7 @@ import { connectPrisma, currentSingletonUrl, databaseUrl, disconnectPrisma, getP
 import { ClientSession } from "./session";
 import { parseTransactionOptions, runWithRetry } from "./transaction";
 import { createSqlCollection, SqlCollection } from "./sqlCollection";
+import { ensureSchemaLazy } from "./schema";
 
 /**
  * The connection object — the port's transaction boundary (ITD-102, compat
@@ -62,7 +63,9 @@ class Connection implements MediciConnection {
   }
 
   async transaction<T>(fn: (session: ClientSession) => Promise<T>, options?: IAnyObject): Promise<T> {
-    const prisma = await connectPrisma();
+    // initialize() is optional: bootstrap (connect + schema) on first use.
+    await ensureSchemaLazy();
+    const prisma = getPrismaClient();
     const opts = parseTransactionOptions(options);
     const txOpts: { maxWait?: number; timeout?: number } = {};
     if (opts.maxWait !== undefined) {
@@ -96,7 +99,10 @@ class Connection implements MediciConnection {
   }
 
   collection(name: string): SqlCollection {
-    return createSqlCollection(getPrismaClient(), name);
+    // Follow the current singleton (see the model collection getter): a
+    // bare getPrismaClient() would rebuild it for the default URL after an
+    // explicit initialize({ databaseUrl }).
+    return createSqlCollection(getPrismaClient(currentSingletonUrl()), name);
   }
 
   get db(): { name: string; collection(name: string): SqlCollection } {

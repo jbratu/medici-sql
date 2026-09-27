@@ -312,3 +312,100 @@ better-sqlite3 13.0.3):
   bracketed (`$.tags[0]`); bracket _string_ keys (`$.["a"]`) are rejected
   by SQLite, and a dot-digit on an object is a key lookup — hence all-digit
   meta path segments take the array-index form.
+
+## Custom schema fields: write / read / filter rule (ITD-94, QA R4)
+
+A field added to the transaction schema via `setTransactionSchema` (e.g.
+`clientId`) is not a Prisma column. It is a **top-level document field**
+(`Entry.transact` puts any valid schema key at the document top level and
+everything else under `meta`). The adapter rule that makes such fields
+writable, readable **and** filterable (the `balance.spec.ts`
+`clientId` assertions) is:
+
+- **Write** (`SqlCollectionImpl.encodeInsertRow`, transactions table
+  only): top-level document keys that are not fixed columns and not
+  `meta` are merged into the `meta` JSON column on insert. The stored row
+  therefore carries them inside `meta`; the other tables are untouched
+  (`journals`/`locks` have no meta column; `balances.meta` has different
+  semantics — it is the exact snapshot payload, never lifted).
+- **Read** (`SqlCollectionImpl.liftSchemaFields`, applied in `find` and
+  `findOne`): for every key of the **current** transaction schema that is
+  not a column and present in the row's `meta` JSON, the value is cast
+  with the schema path's caster (`castValue`) and lifted back to the
+  document top level, removed from `meta`. This is why a `clientId`
+  written as a top-level field reads back as a top-level field and is
+  absent from `meta`, while a non-schema `otherMeta` stays in `meta`.
+  Keys whose cast fails are left in `meta` (never invented values).
+- **Filter** (`filterTranslator.translateFields`): an unknown top-level
+  filter key on a JSON-root collection is translated as a path into the
+  meta JSON — `json_extract(meta, '$.<key>')` with the same value
+  coercion as dotted meta paths (so `book.balance({ account, clientId })`
+  works: `parseBalanceQuery` also emits a top-level `clientId` for a
+  schema-valid key, and the JSON-root de-duplication keeps exactly one
+  clause). Real columns are never shadowed, `$`-prefixed top-level keys
+  (operators) still throw — the scope cap holds.
+
+`Document.id` was added (virtual getter: hex of `_id`) so upstream spec
+patterns like `journal.id` resolve; `_id` itself is unchanged.
+
+## Helper ports (ITD-94)
+
+- `helper/mongoTransaction.ts` — ported in ITD-102 (delegates to
+  `connection.transaction`; name preserved per the API contract).
+- `helper/initModels.ts` — connects the Prisma client and ensures the
+  schema exists (`ensureSchema`), then performs the four upstream
+  `model.init()` calls, which are no-ops against the compat model
+  (schema presence is a SQL-side concern; the module-load side effect
+  `!connection.models["Medici_X"] && setXSchema(...)` already registered
+  the schemas). Name and signature unchanged.
+- `helper/syncIndexes.ts` — name and `{ background }` option signature
+  preserved; delegates to the four compat `Model.syncIndexes(options)`
+  no-ops and must not throw (indexes are managed by Prisma/DDL).
+
+## `initialize(options?)` and schema bootstrap (ITD-94)
+
+`initialize()` is additive and optional — importing `Book` and using it
+without any `initialize()` call works exactly like upstream (no explicit
+bootstrap required). `initialize({ databaseUrl })` points the library at
+an explicit SQLite URL. Semantics:
+
+- `databaseUrl` resolution: `MEDICI_SQL_DATABASE_URL` env wins, else
+  `file:<pkgroot>/medici-sql.db` (repo root; gitignored).
+- `connectPrisma` is idempotent per process; pragmas are
+  `journal_mode=WAL` (skipped for `:memory:`) and `synchronous=NORMAL`.
+- Schema bootstrap is **lazy and idempotent**: `ensureSchemaLazy()`
+  (memoized per process) runs before the first SQL statement via the
+  collection/transaction entry points. If the `medici_*` tables are
+  missing it creates them (`createSchema`); a database that has some but
+  not all tables is treated as corrupt and reset (`resetDatabase`),
+  since a partial schema cannot be migrated forward. Importing the
+  package (even `new Book(...)`) performs no I/O and creates no client
+  (QA S3) — the first DB operation triggers bootstrap.
+- **Singleton URL discipline:** the Prisma client is a process-wide
+  singleton keyed by the URL it was created with. No-arg
+  `getPrismaClient()` / `connectPrisma()` follow the **existing**
+  singleton (`url ?? currentSingletonUrl() ?? databaseUrl()`), so a
+  process that called `initialize({ databaseUrl })` never silently
+  flips back to the default URL — including inside `ensureSchema` /
+  `resetDatabase` / `createSchema`, which previously re-derived the
+  default URL (caught by the packaging smoke). An explicit different URL
+  still rebuilds the singleton (`connection.connect` disconnects the
+  previous one first).
+
+## Verbatim provenance guard (ITD-94, QA M17)
+
+The verbatim copies are pinned permanently, not just proven once:
+
+- `upstream/SRC_PROVENANCE.md` stores the SHA-256 of every file expanded
+  from `upstream/VERBATIM_FILES.txt` (26 files) at `upstream/PINNED_SHA`,
+  same table family as `spec/UPSTREAM_PROVENANCE.md`.
+- `src/errors/index.ts` is the single documented deviation (the
+  `UnsupportedMongoOperationError` export); its row is marked `(ported)`
+  and the baseline script re-applies that export line after re-copying.
+- `scripts/upstream-check.mjs` class **E** hashes the worktree files
+  against the table and fails (exit 1) on any mismatch — it runs on the
+  `--pin-only` fast path (no network) as well as full checks.
+- `npm run lint` runs the guard (`eslint && node scripts/upstream-check
+  .mjs --pin-only`), so the PR CI check (`check-code.yml`) breaks on any
+  edit to a verbatim file; `upstream:check` (scheduled/PR) also covers it.
+- `scripts/upstream-baseline.mjs` regenerates the table on pin bumps.

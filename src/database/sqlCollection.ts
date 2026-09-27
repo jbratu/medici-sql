@@ -56,9 +56,11 @@
  */
 import { ObjectId } from "bson";
 import { IAnyObject } from "../IAnyObject";
-import { Types } from "../compat/mongoose";
+import { Types, castValue } from "../compat/mongoose";
+import type { Schema } from "../compat/mongoose";
+import { isPrototypeAttribute } from "../helper/isPrototypeAttribute";
 import { UnsupportedMongoOperationError } from "../errors/UnsupportedMongoOperationError";
-import { connectPrisma } from "./client";
+import { ensureSchemaLazy } from "./schema";
 import { COLUMN_KINDS, CollectionName, SqlPredicate, translateFilter } from "./filterTranslator";
 import { storedDateTime } from "./filterTranslator";
 import { allocateTransactionIds } from "./idSequence";
@@ -350,11 +352,21 @@ class SqlCollectionImpl implements SqlCollection {
   /** The known medici table, validated in the constructor. */
   private readonly table: CollectionName;
 
-  constructor(private readonly singleton: ItxClient, private readonly name: string) {
+  /**
+   * The compat Schema the model was registered with (QA R4). Custom schema
+   * fields are not table columns: the write path stores them inside `meta`
+   * and the read path lifts the current schema's fields back to the top
+   * level. Re-registered models (setTransactionSchema) create a fresh
+   * adapter with the new schema, so this is always the current one.
+   */
+  private readonly schema?: Schema;
+
+  constructor(private readonly singleton: ItxClient, private readonly name: string, schema?: Schema) {
     if (!(this.name in TABLE_COLUMNS)) {
       throw new UnsupportedMongoOperationError(`SqlCollection: unknown collection "${this.name}"`);
     }
     this.table = this.name as CollectionName;
+    this.schema = schema;
   }
 
   private clientFor(options?: SqlCollectionOptions): PrismaClientView {
@@ -537,6 +549,32 @@ class SqlCollectionImpl implements SqlCollection {
     return doc;
   }
 
+  /**
+   * QA R4 read side: custom schema fields that are not table columns are
+   * stored inside `meta` (write path, `encodeInsertRow`). On read, lift the
+   * fields declared by the model's schema back to the document top level and
+   * cast them to their schema types (ObjectId, Date, ...), matching what
+   * Mongo returns for the same document. `meta` keeps only the keys the
+   * schema does not declare (e.g. `otherMeta`).
+   */
+  private liftSchemaFields(doc: IAnyObject): IAnyObject {
+    if (this.schema === undefined) return doc;
+    const meta = doc.meta;
+    if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return doc;
+    const metaObj = meta as IAnyObject;
+    for (const key of Object.keys(this.schema.paths)) {
+      if (key === "_id" || key === "meta") continue;
+      if (TABLE_COLUMNS[this.table].includes(key)) continue;
+      if (key in doc) continue;
+      if (!(key in metaObj)) continue;
+      const cast = castValue(key, metaObj[key], this.schema.paths[key]);
+      if (cast.error) continue;
+      doc[key] = cast.value;
+      delete metaObj[key];
+    }
+    return doc;
+  }
+
   /** Encode one value for storage in `col` (write side of QA M8). */
   private encodeValue(col: string, value: unknown): unknown {
     const kind: ReadKind | undefined = READ_KINDS[this.table][col];
@@ -575,11 +613,28 @@ class SqlCollectionImpl implements SqlCollection {
           : typeof doc.account_path === "string"
           ? (JSON.parse(doc.account_path) as unknown[]).map((segment: unknown) => String(segment))
           : [];
+        // QA R4 write side: custom schema fields live at the doc top level
+        // (Entry.transact puts every valid schema key there) but the table
+        // has no columns for them, so they are merged into the `meta` JSON.
+        const extraKeys = Object.keys(doc).filter(
+          (key) => !isPrototypeAttribute(key) && key !== "meta" && !FULL_COLUMNS.medici_transactions.includes(key)
+        );
+        let metaToStore: unknown = doc.meta;
+        if (extraKeys.length > 0) {
+          const parsed =
+            typeof doc.meta === "string" ? JSON.parse(doc.meta) : (doc.meta as IAnyObject | null | undefined);
+          const base: IAnyObject =
+            parsed != null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+          for (const key of extraKeys) {
+            base[key] = doc[key];
+          }
+          metaToStore = base;
+        }
         const row: Record<string, unknown> = {
           _id: "",
           credit: encNumber(doc.credit),
           debit: encNumber(doc.debit),
-          meta: encJson(doc.meta),
+          meta: encJson(metaToStore),
           datetime: encDate(doc.datetime) ?? storedDateTime(new Date()),
           account_path: JSON.stringify(accountPath),
           accounts: doc.accounts != null ? String(doc.accounts) : accountPath.join(":"),
@@ -663,7 +718,7 @@ class SqlCollectionImpl implements SqlCollection {
   }
 
   async insertMany(docs: IAnyObject | IAnyObject[], options?: SqlCollectionOptions): Promise<InsertManyResult> {
-    await connectPrisma();
+    await ensureSchemaLazy();
     const list: IAnyObject[] = Array.isArray(docs) ? docs : [docs];
     if (list.length === 0) {
       return { acknowledged: true, insertedIds: {}, insertedCount: 0 };
@@ -731,7 +786,7 @@ class SqlCollectionImpl implements SqlCollection {
     update: IAnyObject,
     options: SqlCollectionOptions | undefined
   ): Promise<UpdateResult> {
-    await connectPrisma();
+    await ensureSchemaLazy();
     const { $set, $setOnInsert, $inc } = this.parseUpdate(update);
     const targetCols = Array.from(new Set([...Object.keys($set), ...Object.keys($inc), ...Object.keys($setOnInsert)]));
     for (const col of targetCols) {
@@ -898,11 +953,11 @@ class SqlCollectionImpl implements SqlCollection {
     const skip = this.validateCount(options?.skip, "skip");
     return {
       toArray: async () => {
-        await connectPrisma();
+        await ensureSchemaLazy();
         const prisma = this.clientFor(options);
         const { sql, params } = this.selectSql(filter, cols, orderBy, limit, skip);
         const rows = (await prisma.$queryRawUnsafe(sql, ...params)) as Record<string, unknown>[];
-        return rows.map((row) => this.rowToDoc(row));
+        return rows.map((row) => this.liftSchemaFields(this.rowToDoc(row)));
       },
     };
   }
@@ -911,14 +966,14 @@ class SqlCollectionImpl implements SqlCollection {
     const cols = this.projectColumns(options?.projection);
     const orderBy = this.orderByFor(options?.sort);
     const { sql, params } = this.selectSql(filter, cols, orderBy, 1, this.validateCount(options?.skip, "skip"));
-    await connectPrisma();
+    await ensureSchemaLazy();
     const prisma = this.clientFor(options);
     const rows = (await prisma.$queryRawUnsafe(sql, ...params)) as Record<string, unknown>[];
-    return rows.length > 0 ? this.rowToDoc(rows[0]) : null;
+    return rows.length > 0 ? this.liftSchemaFields(this.rowToDoc(rows[0])) : null;
   }
 
   async countDocuments(filter?: IAnyObject, options?: SqlCollectionOptions): Promise<number> {
-    await connectPrisma();
+    await ensureSchemaLazy();
     const prisma = this.clientFor(options);
     const pred = this.predicate(filter);
     let sql = `SELECT COUNT(*) AS "count" FROM "${this.name}"`;
@@ -932,7 +987,7 @@ class SqlCollectionImpl implements SqlCollection {
   }
 
   async deleteOne(filter: IAnyObject, options?: SqlCollectionOptions): Promise<DeleteResult> {
-    await connectPrisma();
+    await ensureSchemaLazy();
     const prisma = this.clientFor(options);
     const pred = this.predicate(filter);
     const where = pred.where ? ` WHERE ${pred.where}` : "";
@@ -944,7 +999,7 @@ class SqlCollectionImpl implements SqlCollection {
   }
 
   async deleteMany(filter: IAnyObject, options?: SqlCollectionOptions): Promise<DeleteResult> {
-    await connectPrisma();
+    await ensureSchemaLazy();
     const prisma = this.clientFor(options);
     const pred = this.predicate(filter);
     const where = pred.where ? ` WHERE ${pred.where}` : "";
@@ -985,7 +1040,7 @@ class SqlCollectionImpl implements SqlCollection {
             `aggregate: the fixed GROUP pipeline only applies to medici_transactions (got ${this.name})`
           );
         }
-        await connectPrisma();
+        await ensureSchemaLazy();
         const prisma = this.clientFor(options);
         const pred = this.predicate(match);
         let sql =
@@ -1018,7 +1073,7 @@ class SqlCollectionImpl implements SqlCollection {
   }
 
   async distinct(field: string, filter?: IAnyObject, options?: SqlCollectionOptions): Promise<unknown[]> {
-    await connectPrisma();
+    await ensureSchemaLazy();
     const allCols = new Set(FULL_COLUMNS[this.table]);
     if (!allCols.has(field)) {
       throw new UnsupportedMongoOperationError(`distinct: field "${field}" is not a column of ${this.name}`);
@@ -1036,6 +1091,6 @@ class SqlCollectionImpl implements SqlCollection {
   }
 }
 
-export function createSqlCollection(singleton: ItxClient, name: string): SqlCollection {
-  return new SqlCollectionImpl(singleton, name);
+export function createSqlCollection(singleton: ItxClient, name: string, schema?: Schema): SqlCollection {
+  return new SqlCollectionImpl(singleton, name, schema);
 }

@@ -12,7 +12,7 @@
     "build:node": "tsc -p . && tsc-alias -p tsconfig.json && node scripts/copy-prisma-client.mjs",
     "build:types": "dts-bundle-generator -o ./types/index.d.ts ./src/index.ts --project ./tsconfig.types.json --no-check",
     "clean": "rimraf ./build && rimraf ./types",
-    "lint": "eslint ./spec ./src",
+    "lint": "eslint ./spec ./src && node scripts/upstream-check.mjs --pin-only",
     "lint:fix": "eslint --fix ./spec ./src",
     "prettier": "prettier '**/*.ts' --check",
     "prettier:fix": "prettier '**/*.ts' --write",

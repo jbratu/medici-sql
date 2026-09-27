@@ -373,9 +373,11 @@ const parserRows: ParserRow[] = [
   {
     // sinon-stubbed upstream case: "clientId" is a fake valid transaction
     // key. With the real schema it is NOT a column (it routes to meta), so
-    // the translator must reject it — the real routing is covered by the
-    // non-stubbed meta rows.
-    name: "balance: meta with stubbed valid clientId (throws)",
+    // QA R4 (ITD-94): a top-level key that is a valid schema key is stored
+    // inside the `meta` JSON by the write path, so the translator routes it
+    // to the same meta path as the dotted form. The raw-meta entry for the
+    // same key is a duplicate and is not translated twice.
+    name: "balance: meta with stubbed valid clientId (R4 meta routing)",
     parser: "balance",
     query: { clientId: CLIENT_ID, bookmarked: true },
     book: { name: BOOK },
@@ -386,7 +388,10 @@ const parserRows: ParserRow[] = [
       "meta.bookmarked": true,
       meta: { clientId: CLIENT_ID, bookmarked: true },
     },
-    expected: { error: 'unknown field "clientId"' },
+    expected: {
+      where: "book = ? AND json_extract(meta, '$.clientId') = ? AND json_extract(meta, '$.bookmarked') = 1",
+      params: [BOOK, CLIENT_ID],
+    },
   },
   {
     name: "balance: meta three keys with false value",

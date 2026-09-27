@@ -309,7 +309,7 @@ function castArray(key: string, value: unknown, type: SchemaTypeArray): { value:
   return { value: out };
 }
 
-function castValue(key: string, value: unknown, type: SchemaType): { value: unknown; error?: string } {
+export function castValue(key: string, value: unknown, type: SchemaType): { value: unknown; error?: string } {
   if (type instanceof SchemaTypeObjectId) {
     return castObjectId(value);
   }
@@ -369,7 +369,11 @@ const WIRED_TABLES: ReadonlySet<string> = new Set([
  * module import-pure (QA S3) and avoid a top-level cycle into the database
  * layer.
  */
-function resolveWiredCollection(modelName: string, collectionName: string | undefined): Collection<any> {
+function resolveWiredCollection(
+  modelName: string,
+  collectionName: string | undefined,
+  schema?: Schema
+): Collection<any> {
   const table = collectionName ?? `${modelName.toLowerCase()}s`;
   if (!WIRED_TABLES.has(table)) {
     return makeUnwiredCollection(modelName);
@@ -377,8 +381,13 @@ function resolveWiredCollection(modelName: string, collectionName: string | unde
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { createSqlCollection } = require("../database/sqlCollection") as typeof import("../database/sqlCollection");
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { getPrismaClient } = require("../database/client") as typeof import("../database/client");
-  return createSqlCollection(getPrismaClient(), table) as unknown as Collection<any>;
+  const { currentSingletonUrl, getPrismaClient } = require("../database/client") as typeof import("../database/client");
+  // Follow the CURRENT singleton, not the default URL: after
+  // initialize({ databaseUrl }) (or connection.connect(url)) the active
+  // database is the one the singleton points at. A bare getPrismaClient()
+  // would rebuild the singleton for the default URL and silently drop the
+  // explicit connection (ITD-94).
+  return createSqlCollection(getPrismaClient(currentSingletonUrl()), table, schema) as unknown as Collection<any>;
 }
 
 /**
@@ -391,7 +400,8 @@ function resolveWiredCollection(modelName: string, collectionName: string | unde
  */
 export function model<T = any>(name: string, schema?: Schema, collection?: string): Model<T> {
   const s = schema ?? new Schema();
-  let collectionCache: Collection<any> | undefined;
+  let explicitCollection: Collection<any> | undefined;
+  let lazyCollection: { url: string | undefined; collection: Collection<any> } | undefined;
 
   class CompatModelConstructor {
     static readonly modelName = name;
@@ -401,10 +411,16 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
     static readonly collectionName = collection;
 
     static get collection(): Collection<any> {
-      if (!collectionCache) {
-        collectionCache = resolveWiredCollection(name, collection);
+      if (explicitCollection) {
+        return explicitCollection;
       }
-      return collectionCache;
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { currentSingletonUrl } = require("../database/client") as typeof import("../database/client");
+      const url = currentSingletonUrl();
+      if (!lazyCollection || lazyCollection.url !== url) {
+        lazyCollection = { url, collection: resolveWiredCollection(name, collection, s) };
+      }
+      return lazyCollection.collection;
     }
 
     /**
@@ -412,7 +428,8 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
      * Wins over the lazy ITD-93 wiring for this model instance.
      */
     static set collection(collection: Collection<any>) {
-      collectionCache = collection;
+      explicitCollection = collection;
+      lazyCollection = undefined;
     }
 
     /**
@@ -544,6 +561,19 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
         }
       }
       return out;
+    }
+
+    /**
+     * mongoose virtual: the `_id` rendered as a hex string (consumers
+     * written against mongoose read `doc.id`; it is a prototype getter, so
+     * it never leaks into `toObject()`/`save()` payloads).
+     */
+    get id(): string | null {
+      const id = (this as any)._id;
+      if (id == null) return null;
+      return typeof (id as { toHexString?: unknown }).toHexString === "function"
+        ? (id as { toHexString(): string }).toHexString()
+        : String(id);
     }
 
     /**

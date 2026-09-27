@@ -9,13 +9,27 @@
 #
 # When bumping the pin: re-copy with `npm run upstream:baseline <sha>` and
 # commit the re-copied files together with the matrix + provenance + surface.
+#
+# Pin integrity is PERMANENT (M17): upstream/SRC_PROVENANCE.md stores the
+# expected sha256 of every file listed here, and `npm run lint`
+# (upstream-check class E, --pin-only) plus CI fail on any mismatch. Editing
+# a verbatim file breaks the build until the table is regenerated with
+# `npm run upstream:baseline <sha>`.
+#
+# Documented deviations (NOT byte-identical to the pin):
+#   src/errors/index.ts — adds the UnsupportedMongoOperationError export
+#     (the one permitted addition to errors/, ITD-94). Its table row stores
+#     the ported hash (marked "(ported)") and `upstream:baseline` re-applies
+#     the export after every re-copy.
 src/Book.ts
 src/Entry.ts
 src/IAnyObject.ts
 src/errors/
 src/helper/parse/
 src/helper/addReversedTransactions.ts
+src/helper/extractObjectIdKeysFromSchema.ts
 src/helper/flattenObject.ts
 src/helper/handleVoidMemo.ts
 src/helper/isPrototypeAttribute.ts
 src/helper/safeSetKeyToMetaObject.ts
+src/models/

@@ -139,7 +139,7 @@ function translateFields(filter: IAnyObject, collection: CollectionName, params:
       continue;
     }
     if (root !== null && key === root) {
-      clauses.push(...translateJsonRoot(filter, root, params));
+      clauses.push(...translateJsonRoot(filter, root, kinds, params));
       continue;
     }
     if (root !== null && key.startsWith(`${root}.`)) {
@@ -163,7 +163,23 @@ function translateFields(filter: IAnyObject, collection: CollectionName, params:
     }
     const kind = kinds[key];
     if (kind === undefined) {
-      throw new UnsupportedMongoOperationError(`unknown field "${key}" for collection "${collection}"`);
+      // $-prefixed keys are operators, not fields — they stay out of scope
+      // (only $or is supported, handled above).
+      if (key.startsWith("$")) {
+        throw new UnsupportedMongoOperationError(`unknown field "${key}" for collection "${collection}"`);
+      }
+      // QA R4: a top-level key that is not a column (a custom schema field,
+      // e.g. `clientId`) can only ever be stored inside the JSON `meta`
+      // column — the write path merges non-column fields there (ITD-94).
+      // Translate it as a meta path; Mongo itself matches nothing for a
+      // field no document has, and never errors, so no throw. Collections
+      // without a JSON root still throw.
+      if (root !== null) {
+        clauses.push(translateValue(jsonPathExpr(`${root}.${key}`), key, filter[key], "json", params));
+      } else {
+        throw new UnsupportedMongoOperationError(`unknown field "${key}" for collection "${collection}"`);
+      }
+      continue;
     }
     clauses.push(translateValue(key, key, filter[key], kind, params));
   }
@@ -178,7 +194,12 @@ function translateFields(filter: IAnyObject, collection: CollectionName, params:
  * `meta.<k>....`) are skipped — the dotted keys win, matching how
  * Book.balance treats the raw object.
  */
-function translateJsonRoot(filter: IAnyObject, root: string, params: unknown[]): string[] {
+function translateJsonRoot(
+  filter: IAnyObject,
+  root: string,
+  kinds: Readonly<Record<string, ColumnKind>>,
+  params: unknown[]
+): string[] {
   const value = filter[root];
   if (value === null || value === undefined) return [`${root} IS NULL`];
   if (!isPlainObject(value)) {
@@ -187,18 +208,26 @@ function translateJsonRoot(filter: IAnyObject, root: string, params: unknown[]):
   const clauses: string[] = [];
   for (const k of Object.keys(value)) {
     if (isPrototypeAttribute(k)) continue;
-    if (isCoveredByDottedSibling(filter, root, k)) continue;
+    if (isCoveredByDottedSibling(filter, root, k, kinds)) continue;
     clauses.push(translateValue(jsonPathExpr(`${root}.${k}`), `${root}.${k}`, value[k], "json", params));
   }
   return clauses;
 }
 
-function isCoveredByDottedSibling(filter: IAnyObject, root: string, k: string): boolean {
+function isCoveredByDottedSibling(
+  filter: IAnyObject,
+  root: string,
+  k: string,
+  kinds: Readonly<Record<string, ColumnKind>>
+): boolean {
   const dotted = `${root}.${k}`;
   for (const key of Object.keys(filter)) {
     if (key === dotted || key.startsWith(`${dotted}.`)) return true;
   }
-  return false;
+  // QA R4: a top-level key of the same name that is NOT a real column
+  // translates to the very same meta path, so the raw-meta entry would only
+  // add a duplicate clause. Real columns (e.g. `_journal`) keep both clauses.
+  return k in filter && kinds[k] === undefined;
 }
 
 /**

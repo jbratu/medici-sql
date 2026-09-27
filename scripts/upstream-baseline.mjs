@@ -34,8 +34,12 @@ import {
   npmCiIfStale,
   readVerbatimList,
   scanSpecTree,
+  sha256Text,
   short,
+  SRC_PORTED_REAPPLY,
+  SRC_PORTED_FILES,
   writeProvenance,
+  writeSrcProvenance,
 } from './lib/upstream-lib.mjs';
 import { runCheck } from './upstream-check.mjs';
 
@@ -72,11 +76,32 @@ try {
   const copied = copyTreeFiles(tmp, files);
   process.stdout.write(`re-copied ${copied}/${files.length} verbatim file(s) into the worktree\n`);
 
+  // Re-apply the documented port deviations (ITD-94): the re-copy restores the
+  // upstream bytes of ported files, but the port must keep its permitted
+  // additions — see SRC_PORTED_REAPPLY in scripts/lib/upstream-lib.mjs.
+  for (const [rel, line] of Object.entries(SRC_PORTED_REAPPLY)) {
+    const f = path.join(ROOT, rel);
+    const body = existsSync(f) ? readFileSync(f, 'utf8') : '';
+    if (!body.includes(line.trim())) {
+      writeFileSync(f, `${body.trimEnd() ? body.trimEnd() + '\n\n' : ''}${line}\n`);
+      process.stdout.write(`re-applied ported deviation to ${rel}\n`);
+    }
+  }
+
   const specFiles = scanSpecTree(tmp);
   const rows = {};
   for (const [rel, info] of Object.entries(specFiles)) rows[rel] = { sha256: info.sha, itCount: info.titles.length };
   writeProvenance(newSha, rows);
   process.stdout.write(`regenerated spec/UPSTREAM_PROVENANCE.md (${Object.keys(rows).length} files, ${Object.values(rows).reduce((a, r) => a + r.itCount, 0)} it() total)\n`);
+
+  // M17: regenerate the src verbatim pin-integrity table (M17) from the
+  // worktree AFTER re-copy + re-apply, so ported files store their ported hash.
+  const srcRows = {};
+  for (const rel of files) {
+    srcRows[rel] = { sha256: sha256Text(readFileSync(path.join(ROOT, rel), 'utf8')), ported: Boolean(SRC_PORTED_FILES[rel]) };
+  }
+  writeSrcProvenance(newSha, srcRows);
+  process.stdout.write(`regenerated upstream/SRC_PROVENANCE.md (${Object.keys(srcRows).length} files)\n`);
 
   npmCiIfStale(tmp);
   const dts = buildUpstreamTypes(tmp);

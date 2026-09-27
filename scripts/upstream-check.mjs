@@ -16,15 +16,22 @@
 //      spec/UPSTREAM_PROVENANCE.md. New spec files / new it()s are
 //      unclassified until TEST_COMPAT_MATRIX.md has a tier+rationale row for
 //      them. Changed files are diffed and their matrix rows flagged stale.
+//   E. src/ verbatim pin integrity (M17, ITD-94) — hashes every worktree file
+//      listed in upstream/VERBATIM_FILES.txt against upstream/SRC_PROVENANCE.md.
+//      ALWAYS runs (including the ref==pin fast path); it needs no network.
+//      Editing any verbatim file produces a finding (breaks lint/CI) until the
+//      table is regenerated with `npm run upstream:baseline <sha>`.
 //
 // Plus a git-history audit: a PINNED_SHA bump that changes spec hashes must
 // include TEST_COMPAT_MATRIX.md in the same commit.
 //
-// Usage: node scripts/upstream-check.mjs [--ref <ref>] [--full]
-//   --ref   ref to compare against the pin (default upstream/master)
-//   --full  run all classes even when the ref is already at the pinned SHA
+// Usage: node scripts/upstream-check.mjs [--ref <ref>] [--full] [--pin-only]
+//   --ref      ref to compare against the pin (default upstream/master)
+//   --full     run all classes even when the ref is already at the pinned SHA
+//   --pin-only run class E + audit + matrix only, with no network access and
+//              no ref resolution (this is what `npm run lint` runs)
 //
-// Exit codes: 0 clean, 1 findings (breaking|unclassified|drift|audit|matrix),
+// Exit codes: 0 clean, 1 findings (breaking|unclassified|drift|audit|matrix|srcPin),
 // 2 operational error.
 //
 // Outputs: human-readable report on stdout; JSON summary at
@@ -54,22 +61,64 @@ import {
   npmCiIfStale,
   parseMatrix,
   parseProvenance,
+  parseSrcProvenance,
   readVerbatimList,
   scanSpecTree,
   sha256Text,
   short,
+  SRC_PORTED_FILES,
   unifiedDiff,
   validateMatrix,
 } from './lib/upstream-lib.mjs';
 
 function parseArgs(argv) {
-  const args = { ref: 'upstream/master', full: false };
+  const args = { ref: 'upstream/master', full: false, pinOnly: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--ref') args.ref = argv[++i];
     else if (argv[i] === '--full') args.full = true;
+    else if (argv[i] === '--pin-only') args.pinOnly = true;
     else throw new Error(`unknown argument: ${argv[i]}`);
   }
   return args;
+}
+
+// Class E (M17, ITD-94): hash every worktree file in upstream/SRC_PROVENANCE.md
+// against the stored table. Local only — no network, no git objects needed.
+// Returns the number of files checked.
+function checkSrcProvenance(findings, infos) {
+  const rows = parseSrcProvenance();
+  if (!rows) {
+    findings.push(
+      finding('srcPin', 'fail', 'upstream/SRC_PROVENANCE.md', 'is missing — generate it with `npm run upstream:baseline <sha>` (M17 verbatim pin integrity)')
+    );
+    return 0;
+  }
+  let checked = 0;
+  for (const [rel, expected] of Object.entries(rows).sort((a, b) => a[0].localeCompare(b[0]))) {
+    const f = path.join(ROOT, rel);
+    if (!existsSync(f)) {
+      findings.push(finding('srcPin', 'fail', rel, 'verbatim file missing from the worktree'));
+      continue;
+    }
+    checked++;
+    const actual = sha256Text(readFileSync(f, 'utf8'));
+    if (actual !== expected.sha256) {
+      findings.push(
+        finding(
+          'srcPin',
+          'drift',
+          rel,
+          expected.ported
+            ? `ported file diverged from the stored provenance (sha256 ${actual.slice(0, 12)} != ${expected.sha256.slice(0, 12)}) — if the edit is intentional, regenerate the table with npm run upstream:baseline`
+            : `verbatim file edited (sha256 ${actual.slice(0, 12)} != ${expected.sha256.slice(0, 12)}) — verbatim files must stay byte-identical to the pin; re-copy with npm run upstream:baseline`
+        )
+      );
+    }
+  }
+  for (const rel of Object.keys(SRC_PORTED_FILES).sort()) {
+    if (!rows[rel]) infos.push(`ported file ${rel} has no row in upstream/SRC_PROVENANCE.md — regenerate the table with npm run upstream:baseline`);
+  }
+  return checked;
 }
 
 function failOperational(message, state) {
@@ -86,7 +135,7 @@ function failOperational(message, state) {
   process.exit(2);
 }
 
-function render(state, findings, additive, cleanFF, newRecopy, changedSpec, staleRows, infos, surfaceStats, atPin) {
+function render(state, findings, additive, cleanFF, newRecopy, changedSpec, staleRows, infos, surfaceStats, atPin, srcPinStats = null) {
   const L = [];
   L.push('upstream:check report');
   L.push(`upstream: ${UPSTREAM_REMOTE}`);
@@ -135,6 +184,15 @@ function render(state, findings, additive, cleanFF, newRecopy, changedSpec, stal
   if (rest.length) for (const f of rest) L.push(`    ${f.severity.toUpperCase()}: ${f.message}`);
   else L.push('    OK.');
   L.push('');
+  L.push('[E] src/ verbatim pin integrity (worktree vs upstream/SRC_PROVENANCE.md, M17)');
+  if (srcPinStats) {
+    const eFindings = findings.filter((f) => f.class === 'srcPin');
+    if (eFindings.length) for (const f of eFindings) L.push(`    ${f.severity.toUpperCase()}: ${f.message}`);
+    else L.push(`    OK — ${srcPinStats.checked} file(s) match the pinned provenance.`);
+  } else {
+    L.push('    skipped');
+  }
+  L.push('');
   const failing = findings.length;
   if (failing === 0) L.push(`RESULT: CLEAN (0 findings — exit 0)`);
   else L.push(`RESULT: ${failing} finding(s) — exit 1`);
@@ -154,11 +212,13 @@ export async function runCheck(args) {
   let surfaceStats = null;
   let verbatimChecked = 0;
 
-  try {
-    ensureUpstreamRemote();
-    gitText(['fetch', 'upstream', '--quiet']);
-  } catch (err) {
-    failOperational(`git fetch upstream failed: ${err.message}`, state);
+  if (!args.pinOnly) {
+    try {
+      ensureUpstreamRemote();
+      gitText(['fetch', 'upstream', '--quiet']);
+    } catch (err) {
+      failOperational(`git fetch upstream failed: ${err.message}`, state);
+    }
   }
 
   const pinPath = path.join(ROOT, 'upstream', 'PINNED_SHA');
@@ -168,10 +228,14 @@ export async function runCheck(args) {
   state.pin = pin;
 
   let newSha;
-  try {
-    newSha = gitText(['rev-parse', '--verify', `${args.ref}^{commit}`]);
-  } catch (err) {
-    failOperational(`cannot resolve ref "${args.ref}": ${err.message}`, state);
+  if (args.pinOnly) {
+    newSha = pin; // no ref resolution, no network
+  } else {
+    try {
+      newSha = gitText(['rev-parse', '--verify', `${args.ref}^{commit}`]);
+    } catch (err) {
+      failOperational(`cannot resolve ref "${args.ref}": ${err.message}`, state);
+    }
   }
   state.newSha = newSha;
 
@@ -197,12 +261,19 @@ export async function runCheck(args) {
   const matrix = parseMatrix();
   if (matrix) validateMatrix(matrix, findings);
 
-  if (newSha === pin && !args.full) {
-    const state2 = { ...state, verbatimChecked: 0 };
-    const text = render(state2, findings, [], [], [], [], [], [], null, true);
+  // ---- Class E: src/ verbatim pin integrity — always runs (local hashes only) ----
+  const srcPinStats = { checked: checkSrcProvenance(findings, infos) };
+
+  if ((args.pinOnly || newSha === pin) && !args.full) {
+    const state2 = { ...state, verbatimChecked: 0, ref: args.pinOnly ? '(pin-only)' : args.ref };
+    const text = render(state2, findings, [], [], [], [], [], infos, null, true, srcPinStats);
     writeFileSync(
       path.join(ROOT, 'upstream-check.report.json'),
-      JSON.stringify({ format: REPORT_FORMAT, generatedAt: new Date().toISOString(), upstream: state2, exit: findings.length ? 1 : 0, error: null, findings, note: 'ref == pin; classes A/B/C skipped' }, null, 2) + '\n'
+      JSON.stringify(
+        { format: REPORT_FORMAT, generatedAt: new Date().toISOString(), upstream: state2, exit: findings.length ? 1 : 0, error: null, findings, note: args.pinOnly ? 'pin-only: class E + audit + matrix only (no network)' : 'ref == pin; classes A/B/C skipped' },
+        null,
+        2
+      ) + '\n'
     );
     writeFileSync(path.join(ROOT, 'upstream-check-report.md'), text);
     process.stdout.write(text);
@@ -251,6 +322,17 @@ export async function runCheck(args) {
     const verbatimFiles = expandVerbatimFiles(entries, tmp);
     verbatimChecked = verbatimFiles.length;
     for (const f of verbatimFiles) {
+      if (SRC_PORTED_FILES[f]) {
+        // Documented port deviation — never a finding; class E guards its bytes.
+        const portedNew = existsSync(path.join(tmp, f)) ? readFileSync(path.join(tmp, f), 'utf8') : null;
+        const portedOurs = existsSync(path.join(ROOT, f)) ? readFileSync(path.join(ROOT, f), 'utf8') : null;
+        if (portedNew !== null && portedOurs === portedNew) {
+          cleanFF.push(`${f} (upstream now matches the ported content — no action needed)`);
+        } else {
+          infos.push(`ported deviation intact: ${f} — ${SRC_PORTED_FILES[f]}`);
+        }
+        continue;
+      }
       const tmpF = path.join(tmp, f);
       const newContent = existsSync(tmpF) ? readFileSync(tmpF, 'utf8') : null;
       const rootF = path.join(ROOT, f);
@@ -325,7 +407,7 @@ export async function runCheck(args) {
 
     // ---- Reports ----
     state.verbatimChecked = verbatimChecked;
-    const text = render(state, findings, additive, cleanFF, newRecopy, changedSpec, staleRows, infos, surfaceStats);
+    const text = render(state, findings, additive, cleanFF, newRecopy, changedSpec, staleRows, infos, surfaceStats, false, srcPinStats);
     const summary = {
       format: REPORT_FORMAT,
       generatedAt: new Date().toISOString(),
@@ -362,7 +444,7 @@ if (isMain) {
   try {
     args = parseArgs(process.argv.slice(2));
   } catch (err) {
-    process.stderr.write(`upstream:check: ${err.message}\nUsage: node scripts/upstream-check.mjs [--ref <ref>] [--full]\n`);
+    process.stderr.write(`upstream:check: ${err.message}\nUsage: node scripts/upstream-check.mjs [--ref <ref>] [--full] [--pin-only]\n`);
     process.exit(2);
   }
   runCheck(args)
