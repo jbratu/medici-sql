@@ -506,6 +506,6 @@ function describeValue(value: unknown): string {
  * `Date.toISOString()`'s `Z` suffix would break boundary comparisons
  * (`"…+00:00" < "…Z"` in lex order at the same instant).
  */
-function storedDateTime(date: Date): string {
+export function storedDateTime(date: Date): string {
   return date.toISOString().replace(/Z$/, "+00:00");
 }

@@ -6,6 +6,7 @@ import * as path from "path";
 import { ObjectId } from "bson";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../src/generated";
+import { Types } from "../src/compat/mongoose";
 import { currentSingletonUrl, disconnectPrisma, getPrismaClient } from "../src/database/client";
 import { resetDatabase } from "../src/database/schema";
 import { connection } from "../src/database/connection";
@@ -391,7 +392,13 @@ describe("connection.transaction (ITD-102, compat core C)", function () {
     expect((caught as { name?: string }).name).to.equal("TransactionIdReuseError");
     expect((caught as Error).message).to.match(/outside the transaction callback/i);
     const cause = (caught as TransactionIdReuseError).cause as { code?: string };
-    expect(cause?.code).to.equal("P2002"); // the raw constraint violation is attached, not thrown raw
+    // The raw constraint violation is attached, not thrown raw. Journal _id is
+    // a PRIMARY KEY: the ITD-102 delegate-based insert surfaced that collision
+    // as P2002; the raw-SQL insert (ITD-93) surfaces Prisma's
+    // SQLITE_CONSTRAINT_PRIMARYKEY mapping P2010. Both are the
+    // unique-constraint class the retry layer branches on.
+    expect(cause?.code).to.be.oneOf(["P2002", "P2010"]);
+    expect(isUniqueConstraintError(cause)).to.equal(true);
   });
 
   it("allocates transaction ids from medici_id_sequence inside the write tx (QA M3)", async function () {
@@ -439,20 +446,24 @@ describe("connection.transaction (ITD-102, compat core C)", function () {
     expect(Number(afterProbe.seconds)).to.equal(Number(beforeProbe.seconds));
     expect(Number(afterProbe.counter)).to.equal(Number(beforeProbe.counter));
 
-    // The no-session insertMany path allocates in an ad-hoc write transaction.
+    // The no-session insertMany path allocates in an ad-hoc write transaction
+    // (forceServerObjectId is the upstream shape — Entry.ts:130).
     const journalId = newId();
     const txCol = connection.db.collection("medici_transactions");
     const beforeSeed = (await prisma.idSequence.findUnique({ where: { id: 1 } }))!;
-    const { insertedIds, insertedCount } = await txCol.insertMany([
-      txDoc("m3-book", "Income", 1, 0, journalId),
-      txDoc("m3-book", "Outcome", 0, 1, journalId),
-    ]);
+    const { insertedIds, insertedCount } = await txCol.insertMany(
+      [txDoc("m3-book", "Income", 1, 0, journalId), txDoc("m3-book", "Outcome", 0, 1, journalId)],
+      { forceServerObjectId: true }
+    );
     expect(insertedCount).to.equal(2);
     const seedIds = Object.values(insertedIds);
     for (const id of seedIds) {
-      expect(id).to.match(/^[0-9a-f]{24}$/);
+      expect(id).to.be.instanceOf(Types.ObjectId);
+      expect(id.toHexString()).to.match(/^[0-9a-f]{24}$/);
     }
-    expect(Buffer.compare(Buffer.from(seedIds[0], "hex"), Buffer.from(seedIds[1], "hex"))).to.equal(-1);
+    expect(
+      Buffer.compare(Buffer.from(seedIds[0].toHexString(), "hex"), Buffer.from(seedIds[1].toHexString(), "hex"))
+    ).to.equal(-1);
     const afterSeed = (await prisma.idSequence.findUnique({ where: { id: 1 } }))!;
     if (Number(afterSeed.seconds) === Number(beforeSeed.seconds)) {
       expect(Number(afterSeed.counter) - Number(beforeSeed.counter)).to.equal(2);
@@ -535,9 +546,9 @@ describe("connection.transaction (ITD-102, compat core C)", function () {
 
       const lockRow = await lockCol.findOne({ book, account: "Income" });
       expect(lockRow, `run ${run}: one lock row for Income`).to.not.equal(null);
-      // Prisma field `version` maps to Mongo's `__v`; the compat boundary
-      // (ITD-94) re-exposes the Mongo field name.
-      expect((lockRow as { version?: number }).version, `run ${run}: __v counts only the committed spends`).to.equal(2);
+      // The adapter re-exposes the Mongo field name (ITD-93); Prisma's
+      // `version` is the stored column behind `__v`.
+      expect((lockRow as { __v?: number }).__v, `run ${run}: __v counts only the committed spends`).to.equal(2);
 
       console.log(`xacid shape N=18 run ${run}: ${wall} ms wall (spike ITD-89 baseline: 131 ms at N=18)`);
     }

@@ -182,11 +182,28 @@ describe("compat core A (ITD-91)", () => {
       expect((transactionModel as any).diffIndexes()).to.deep.equal({ toDrop: [], toCreate: [] });
     });
 
-    it("exposes .collection but every operation names the missing adapter (ITD-93)", () => {
+    it("wires .collection to the raw Prisma adapter (ITD-93)", () => {
       const collection = (transactionModel as any).collection;
       expect(collection).to.not.equal(undefined);
+      expect(typeof collection.insertOne).to.equal("function");
+      expect(typeof collection.insertMany).to.equal("function");
+      expect(typeof collection.updateOne).to.equal("function");
+      expect(typeof collection.updateMany).to.equal("function");
+      expect(typeof collection.find).to.equal("function");
+      expect(typeof collection.findOne).to.equal("function");
+      expect(typeof collection.countDocuments).to.equal("function");
+      expect(typeof collection.deleteOne).to.equal("function");
+      expect(typeof collection.deleteMany).to.equal("function");
+      expect(typeof collection.aggregate).to.equal("function");
+      expect(typeof collection.distinct).to.equal("function");
+    });
+
+    it("keeps the loud-failure proxy for models whose table is not a medici table", () => {
+      const scratch = model("Scratch_ITD93", new Schema({ x: String }));
+      const collection = (scratch as any).collection;
       expect(() => collection.insertOne({})).to.throw(UnsupportedMongoOperationError);
       expect(() => collection.insertOne({})).to.throw(/ITD-93/);
+      connection.deleteModel("Scratch_ITD93");
     });
   });
 

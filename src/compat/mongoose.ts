@@ -354,6 +354,33 @@ function makeUnwiredCollection(modelName: string): Collection<any> {
   return new Proxy({}, handler) as unknown as Collection<any>;
 }
 
+const WIRED_TABLES: ReadonlySet<string> = new Set([
+  "medici_transactions",
+  "medici_journals",
+  "medici_locks",
+  "medici_balances",
+]);
+
+/**
+ * Resolve the driver-shaped collection for a model (ITD-93). The known
+ * medici tables (model names pluralize to their table names) map to the raw
+ * Prisma adapter (src/database/sqlCollection.ts); anything else keeps the
+ * loud-failure proxy. The requires are lazy on purpose: they keep this
+ * module import-pure (QA S3) and avoid a top-level cycle into the database
+ * layer.
+ */
+function resolveWiredCollection(modelName: string, collectionName: string | undefined): Collection<any> {
+  const table = collectionName ?? `${modelName.toLowerCase()}s`;
+  if (!WIRED_TABLES.has(table)) {
+    return makeUnwiredCollection(modelName);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { createSqlCollection } = require("../database/sqlCollection") as typeof import("../database/sqlCollection");
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { getPrismaClient } = require("../database/client") as typeof import("../database/client");
+  return createSqlCollection(getPrismaClient(), table) as unknown as Collection<any>;
+}
+
 /**
  * Register (or re-register) a model on `connection.models`. The returned
  * value is the mongoose-shaped model constructor: `new M(doc)` builds a
@@ -375,14 +402,14 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
 
     static get collection(): Collection<any> {
       if (!collectionCache) {
-        collectionCache = makeUnwiredCollection(name);
+        collectionCache = resolveWiredCollection(name, collection);
       }
       return collectionCache;
     }
 
     /**
-     * ITD-93 installs the real driver-shaped adapter here (unit tests
-     * install fakes). Until then the getter returns the loud-failure proxy.
+     * Install an explicit collection (unit tests install fakes here).
+     * Wins over the lazy ITD-93 wiring for this model instance.
      */
     static set collection(collection: Collection<any>) {
       collectionCache = collection;
@@ -531,9 +558,9 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
           set[key] = value;
         }
       }
-      return (CompatModelConstructor.collection.updateOne({ _id: (this as any)._id }, { $set: set }, options) as Promise<any>).then(
-        () => this
-      );
+      return (
+        CompatModelConstructor.collection.updateOne({ _id: (this as any)._id }, { $set: set }, options) as Promise<any>
+      ).then(() => this);
     }
 
     /** Remove this document (balance.spec.ts:155). */
