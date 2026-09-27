@@ -623,8 +623,7 @@ class SqlCollectionImpl implements SqlCollection {
         if (extraKeys.length > 0) {
           const parsed =
             typeof doc.meta === "string" ? JSON.parse(doc.meta) : (doc.meta as IAnyObject | null | undefined);
-          const base: IAnyObject =
-            parsed != null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+          const base: IAnyObject = parsed != null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
           for (const key of extraKeys) {
             base[key] = doc[key];
           }

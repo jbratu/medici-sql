@@ -1,6 +1,6 @@
 {
   "format": "medici-sql/test-results/v1",
-  "generatedAt": "2026-09-27T22:38:17.726Z",
+  "generatedAt": "2026-09-27T22:48:40.586Z",
   "perFile": {
     "spec/alias-probe.spec.ts": {
       "passed": 1,
@@ -8,8 +8,8 @@
       "pending": 0
     },
     "spec/balance.spec.ts": {
-      "passed": 5,
-      "failed": 4,
+      "passed": 8,
+      "failed": 1,
       "pending": 0
     },
     "spec/book.spec.ts": {
@@ -53,8 +53,8 @@
       "pending": 0
     },
     "spec/fpPrecision.spec.ts": {
-      "passed": 0,
-      "failed": 3,
+      "passed": 3,
+      "failed": 0,
       "pending": 0
     },
     "spec/handleVoidMemo.spec.ts": {
@@ -104,8 +104,8 @@
     }
   },
   "totals": {
-    "passed": 310,
-    "failed": 20,
+    "passed": 316,
+    "failed": 14,
     "pending": 2,
     "executed": 330
   },

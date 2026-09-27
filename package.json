@@ -12,11 +12,7 @@
     "build:node": "tsc -p . && tsc-alias -p tsconfig.json && node scripts/copy-prisma-client.mjs",
     "build:types": "dts-bundle-generator -o ./types/index.d.ts ./src/index.ts --project ./tsconfig.types.json --no-check",
     "clean": "rimraf ./build && rimraf ./types",
-<<<<<<< HEAD
-    "lint": "eslint ./spec ./src && node scripts/upstream-check.mjs --pin-only",
-=======
     "lint": "eslint ./spec ./src && node scripts/spec-integrity.mjs && node scripts/upstream-check.mjs --pin-only",
->>>>>>> b696e71 (test(ITD-95): Vendored upstream spec suite — harness, matrix, provenance, guards)
     "lint:fix": "eslint --fix ./spec ./src",
     "prettier": "prettier '**/*.ts' --check",
     "prettier:fix": "prettier '**/*.ts' --write",
