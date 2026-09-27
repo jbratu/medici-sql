@@ -639,5 +639,9 @@ export interface Document {
 
 export type FilterQuery<T> = { [K in keyof T]?: any } & Record<string, any>;
 
-/** Prisma-interactive-transaction-backed ClientSession lands in ITD-102. */
-export type ClientSession = any;
+// The verbatim upstream surface (IOptions.ts, models/, helper/) imports
+// `ClientSession` from "mongoose", which the tsconfig paths map to this shim.
+// The real Prisma-backed session lands in compat core C (ITD-102); re-export
+// it here so the verbatim imports stay type-correct and the bundled d.ts
+// carries a single ClientSession declaration.
+export { ClientSession } from "../database/session";

@@ -44,17 +44,29 @@ export function isInMemoryUrl(url: string): boolean {
 }
 
 let client: PrismaClient | undefined;
+let clientUrl: string | undefined;
 let connectPromise: Promise<PrismaClient> | undefined;
+
+/** The url the current singleton client was built for; undefined when no client exists yet. */
+export function currentSingletonUrl(): string | undefined {
+  return clientUrl;
+}
 
 /**
  * Return the singleton client, constructing it lazily. Construction opens
  * no connection and performs no I/O (the better-sqlite3 adapter defers
- * opening until the first query).
+ * opening until the first query). An explicit `url` (from
+ * connection.connect(url)) overrides the env/default; passing a different
+ * url than the existing client silently rebuilds the singleton, so callers
+ * that must not leak the old connection should disconnectPrisma() first
+ * (connection.connect does).
  */
-export function getPrismaClient(): PrismaClient {
-  if (!client) {
-    const adapter = new PrismaBetterSqlite3({ url: databaseUrl(), timeout: ADAPTER_TIMEOUT_MS });
+export function getPrismaClient(url?: string): PrismaClient {
+  const target = url ?? databaseUrl();
+  if (!client || clientUrl !== target) {
+    const adapter = new PrismaBetterSqlite3({ url: target, timeout: ADAPTER_TIMEOUT_MS });
     client = new PrismaClient({ adapter });
+    clientUrl = target;
   }
   return client;
 }
@@ -63,14 +75,15 @@ export function getPrismaClient(): PrismaClient {
  * Ensure the client is connected and the port's pragmas are applied.
  * Idempotent: the pragma sequence runs once per process per client.
  */
-export function connectPrisma(): Promise<PrismaClient> {
-  const prisma = getPrismaClient();
+export function connectPrisma(url?: string): Promise<PrismaClient> {
+  const targetUrl = url ?? databaseUrl();
+  const prisma = getPrismaClient(targetUrl);
   if (!connectPromise) {
     connectPromise = (async () => {
       await prisma.$connect();
       // WAL is a no-op on in-memory databases (journal_mode stays
       // "memory"); skip it there so the call is meaningful everywhere.
-      if (!isInMemoryUrl(databaseUrl())) {
+      if (!isInMemoryUrl(targetUrl)) {
         await prisma.$executeRawUnsafe("PRAGMA journal_mode=WAL");
       }
       await prisma.$executeRawUnsafe("PRAGMA synchronous=NORMAL");
@@ -82,6 +95,7 @@ export function connectPrisma(): Promise<PrismaClient> {
       if (client) {
         client.$disconnect().catch(() => undefined);
         client = undefined;
+        clientUrl = undefined;
       }
     });
   }
@@ -90,9 +104,13 @@ export function connectPrisma(): Promise<PrismaClient> {
 
 /** Disconnect and forget the singleton (test teardown). */
 export async function disconnectPrisma(): Promise<void> {
+  if (connectPromise) {
+    await connectPromise.catch(() => undefined);
+    connectPromise = undefined;
+  }
   if (client) {
     await client.$disconnect();
     client = undefined;
-    connectPromise = undefined;
+    clientUrl = undefined;
   }
 }

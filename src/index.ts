@@ -1,11 +1,17 @@
 /**
  * Public entry point for medici-sql.
  *
- * Minimal at the scaffold stage (ITD-90): the repo builds, lints, and can
- * create/reset a SQLite database, but ships no Medici logic yet. The single
- * re-export exists because the verbatim helper
- * src/helper/addReversedTransactions.ts imports Entry from the package
- * root. The full public surface (Book, Entry, models, errors, helpers) is
- * wired up in ITD-94.
+ * Grows additively per compat-core ticket: the scaffold (ITD-90) re-exported
+ * only Entry (the verbatim helper src/helper/addReversedTransactions.ts
+ * imports it from the package root); compat core C (ITD-102) adds the
+ * transaction boundary surface — `connection`, `mongoTransaction`,
+ * `ClientSession`, and the database-layer errors. The remaining upstream
+ * surface (Book, models, set*Schema, initModels, syncIndexes) is wired up in
+ * ITD-94.
  */
 export { Entry } from "./Entry";
+export { connection } from "./database/connection";
+export type { MediciConnection } from "./database/connection";
+export { ClientSession } from "./database/session";
+export { SessionClosedError, TransactionIdReuseError } from "./database/errors";
+export { mongoTransaction } from "./helper/mongoTransaction";

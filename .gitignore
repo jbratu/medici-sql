@@ -1,5 +1,7 @@
 node_modules/
-types/
+# Build output only (dts-bundle-generator emits ./types/index.d.ts).
+# Unanchored, this also swallowed spec/types/ (the tsd test directory).
+/types/
 build/
 coverage/
 .nyc_output/
