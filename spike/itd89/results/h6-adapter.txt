@@ -1,0 +1,6 @@
+== H6a 1000 sequential interactive transactions (2 tx inserts + 1 journal + 1 lock upsert each) ==
+wall=5359ms commitsPerSec=186.6 perCommitAvg=5.4ms txRows=2000 journals=1000 (expect 2000/1000)
+
+== H6b contrast: 1000 commits in ONE big transaction (no per-commit boundary) ==
+wall=522ms perCommitIfBatched=0.52ms (baseline for why per-commit boundaries cost; xacid requires per-entry boundaries so H6a is the operative number)
+done

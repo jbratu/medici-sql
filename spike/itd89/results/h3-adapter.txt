@@ -1,0 +1,39 @@
+== S6 read-your-writes + cross-connection invisibility ==
+visibleInTx=1 visibleOtherPreCommit=0 visibleOtherPostCommit=1 (expect 1 / 0 / 1)
+S6 PASS=true
+
+== S8 BEGIN IMMEDIATE probe inside $transaction ==
+BEGIN IMMEDIATE: {"name":"PrismaClientKnownRequestError","code":"P2010","clientVersion":"7.10.0","meta":{"driverAdapterError":{"name":"DriverAdapterError","cause":{"originalCode":"SQLITE_ERROR","originalMessage":"cannot start a transaction within a transaction","kind":"sqlite","extendedCode":1,"message":"cannot start a transaction within a transaction"}}},"message":" | Invalid `prisma.$queryRawUnsafe()` invocation: | "}
+BEGIN EXCLUSIVE: {"name":"PrismaClientKnownRequestError","code":"P2010","clientVersion":"7.10.0","meta":{"driverAdapterError":{"name":"DriverAdapterError","cause":{"originalCode":"SQLITE_ERROR","originalMessage":"cannot start a transaction within a transaction","kind":"sqlite","extendedCode":1,"message":"cannot start a transaction within a transaction"}}},"message":" | Invalid `prisma.$queryRawUnsafe()` invocation: | "}
+BEGIN: {"name":"PrismaClientKnownRequestError","code":"P2010","clientVersion":"7.10.0","meta":{"driverAdapterError":{"name":"DriverAdapterError","cause":{"originalCode":"SQLITE_ERROR","originalMessage":"cannot start a transaction within a transaction","kind":"sqlite","extendedCode":1,"message":"cannot start a transaction within a transaction"}}},"message":" | Invalid `prisma.$queryRawUnsafe()` invocation: | "}
+
+== S3 cross-process contention (child holds write txn 3000ms; parent adapter busy timeout=800ms) ==
+childReady=true
+parentWriteError: elapsed=808ms err={"name":"PrismaClientKnownRequestError","code":"P1008","clientVersion":"7.10.0","meta":{"modelName":"Tx","driverAdapterError":{"name":"DriverAdapterError","cause":{"originalCode":"SQLITE_BUSY","originalMessage":"database is locked","kind":"SocketTimeout"}}},"message":" | Invalid `tx.tx.create()` invocation in | /home/jared/repos/medici-sql/spike/itd89/adapter/h3-semantics.ts:138:21"}
+
+== S7 retry wrapper against live contention (starts while child still holds lock) ==
+retryResult=committed attempts=3 elapsed=2222ms (expect success after child releases at ~2500ms)
+childCommitted=true
+
+== S7b id-reuse hazard: P2002 must NOT be retried; regenerated ids ARE safe ==
+fixedIdReinsert: {"name":"PrismaClientKnownRequestError","code":"P2002","clientVersion":"7.10.0","meta":{"driverAdapterError":{"name":"DriverAdapterError","cause":{"originalCode":"SQLITE_CONSTRAINT_PRIMARYKEY","originalMessage":"UNIQUE constraint failed: medici_transactions.id","kind":"UniqueConstraintViolation","constraint":{"fields":["id"]},"table":"medici_transactions"}},"modelName":"Tx"},"message":" | Invalid `tx.tx.create()` invocation in | /home/jared/repos/medici-sql/spike/itd89/adapter/h3-semantics.ts:174:19"} (expect P2002, no retry loop)
+rowsWithFixedId=1 (expect 1 — no duplicate corruption)
+regeneratedIdPerAttempt: committed=true (id generated inside fn per attempt)
+
+== S7c rollback safety: id reuse after pre-commit failure is safe ==
+idReuseAfterRollback committed=yes (expect yes — SQLite rolled back the first insert)
+
+== S2 pragma-in-URL probe (adapter path) ==
+url=file:./db-pragma-test.db?pragma=journal_mode(WAL)
+filesBefore=[] filesAfter=["db-pragma-test.db?pragma=journal_mode(WAL)"] newFiles=["db-pragma-test.db?pragma=journal_mode(WAL)"]
+  "db-pragma-test.db?pragma=journal_mode(WAL)" size=0
+normalDbStillExists=true
+
+== S3b journal_mode persistence + synchronous per-connection ==
+journal_mode initial=[{"journal_mode":"delete"}]
+journal_mode after set (same client)=[{"journal_mode":"wal"}]
+journal_mode new client (persistent?)=[{"journal_mode":"wal"}]
+journal_mode back to DELETE, old client sees=[{"journal_mode":"wal"}] (per-connection? )
+synchronous A=1 B(new)=2 (expect A=1, B=2 => per-connection)
+bigintProbe typeof=bigint value=5 (adapter sets defaultSafeIntegers(true))
+done

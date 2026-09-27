@@ -1,0 +1,14 @@
+== H5a round-trip: 20-byte key with 0x00 at [3] and [12] (hex=0b3055009fc4e90e33587da200ec11365b80a5ca) ==
+latin1TEXT roundtrip byteExact=true  hexTEXT=true  BLOB=true
+
+== H5b SQL string functions on the NUL-containing TEXT ==
+length(latin1)=3 (20 => no C-string truncation, or 3 => truncated at first NUL)
+substr(latin1,1,8) bytes=3 (8 => full, 3 => truncated at NUL)
+instr(latin1, NUL)=4 (0 => functions see no NUL / truncated)
+latin1 LIKE 'ab%' rows=0 (key starts 0x0b 0x24... so expect 0 either way; probe recorded)
+
+== H5c order preservation: hex TEXT vs raw byte order ==
+100 random 20-byte keys (sha1-shaped, NULs included): ORDER BY hex matches byte order, ORDER BY latin1 matches byte order => true
+H5c PASS=true
+NOTE: P(sha1 digest contains 0x00) = 1 - (255/256)^20 = 0.0753; NUL round-trips exactly through better-sqlite3 TEXT/BLOB, but hex-encoding keeps keys safe across SQL string functions, tooling, and JSON.
+done

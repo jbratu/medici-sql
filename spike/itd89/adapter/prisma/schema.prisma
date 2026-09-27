@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Tx {
+  id              String    @id
+  book            String
+  account         String
+  credit          Float     @default(0)
+  debit           Float     @default(0)
+  memo            String    @default("")
+  datetime        DateTime
+  journal         String
+  timestamp       DateTime
+  voided          Boolean?
+  voidReason      String?
+  originalJournal String?
+  meta            String?
+  accountPath0    String?
+  accountPath1    String?
+  accountPath2    String?
+
+  @@index([book, account, datetime])
+  @@index([journal])
+  @@map("medici_transactions")
+}
+
+model Journal {
+  id         String   @id
+  book       String
+  memo       String   @default("")
+  datetime   DateTime
+  txIds      String   @default("[]")
+  voided     Boolean?
+  voidReason String?
+
+  @@map("medici_journals")
+}
+
+model Lock {
+  id        String   @id
+  book      String
+  account   String
+  updatedAt DateTime
+  version   Int      @default(0) @map("__v")
+
+  @@unique([account, book])
+  @@index([updatedAt])
+  @@map("medici_locks")
+}
+
+model IdSeq {
+  id      Int    @id @default(1)
+  seconds Int
+  counter Int    @default(0)
+  instance Bytes
+
+  @@map("medici_id_sequence")
+}
+
+model NulProbe {
+  id     String @id
+  latin1 String
+  hex    String
+  raw    Bytes
+
+  @@map("nul_probe")
+}

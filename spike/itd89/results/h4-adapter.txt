@@ -1,0 +1,46 @@
+== H4a string ordering: SQLite ORDER BY + > / <= vs ObjectId comparison ==
+order=[00000000000000000000000f, 000000000000000000000010] (expect 00000000000000000000000f, 000000000000000000000010)
+gt(A)=[000000000000000000000010] (expect [000000000000000000000010])  lte(A)=[00000000000000000000000f] (expect [00000000000000000000000f])
+bson: A.equals(B)=false byteCompare(A,B)=-1 A.getTimestamp()=0s B.getTimestamp()=0s
+H4a boundary PASS=true
+
+== H4b Number()/parseInt trap: ids sharing the first 8 hex chars (same second) ==
+sqliteOrder=[6ab8d8f00000000000000001, 6ab8d8f00000000000000002] (expect 6ab8d8f00000000000000001, 6ab8d8f00000000000000002)
+parseInt(C,16)=3.3028877850250547e+28 parseInt(D,16)=3.3028877850250547e+28 equalAsNumbers=true (naive numeric comparison CANNOT distinguish them)
+sqlite id>C => [6ab8d8f00000000000000002] (expect [6ab8d8f00000000000000002]) — string BINARY collation is correct where numeric is blind
+H4b PASS=true
+
+== H4c in-process monotonicity (100k rapid successive ObjectIds) ==
+generated=100000 in 24ms inversions=0 (expect 0 — bson counter is monotonic within a process)
+H4c PASS=true
+
+== H4d getTimestamp round-trip through the DB (Book.ts:113) ==
+roundTripFailures=0/50 (expect 0); sample: 6ab8d8f090624a810aa6bda7 ts=1790499056s (getTimestamp() returns a Date in bson 7.x)
+H4d PASS=true
+
+== H4e $gt snapshot filter (Book.ts:104 pattern) over String ids ==
+snapshotFilter mismatches=none (id > snapshot returned exactly the later ids for idx 0,1,37,50,99)
+H4e PASS=true
+
+== H4f cross-process ordering within a second (10 rounds; earlier vs later creator) ==
+ObjectId same-second layout = [4B second][5B per-process random][3B counter].
+Cross-process order is fixed by the 5-byte random prefix, NOT creation time.
+round 1: sameSec=false earlierMin=6ab8d8f190624a810aa6be3d laterMin=6ab8d8f273fc745b0d2e7064 laterMax=6ab8d8f273fc745b0d2e708b earlierMax=6ab8d8f190624a810aa6be64 inverted=false fullyInverted=false
+round 2: sameSec=true earlierMin=6ab8d8f290624a810aa6be65 laterMin=6ab8d8f24dc4562e5f02f2bb laterMax=6ab8d8f24dc4562e5f02f2e2 earlierMax=6ab8d8f290624a810aa6be8c inverted=true fullyInverted=true
+round 3: sameSec=false earlierMin=6ab8d8f290624a810aa6be8d laterMin=6ab8d8f31d340729de3eac76 laterMax=6ab8d8f31d340729de3eac9d earlierMax=6ab8d8f290624a810aa6beb4 inverted=false fullyInverted=false
+round 4: sameSec=true earlierMin=6ab8d8f390624a810aa6beb5 laterMin=6ab8d8f3dd39c79af754ca65 laterMax=6ab8d8f3dd39c79af754ca8c earlierMax=6ab8d8f390624a810aa6bedc inverted=false fullyInverted=false
+round 5: sameSec=false earlierMin=6ab8d8f390624a810aa6bedd laterMin=6ab8d8f4faf5796893f3946f laterMax=6ab8d8f4faf5796893f39496 earlierMax=6ab8d8f390624a810aa6bf04 inverted=false fullyInverted=false
+round 6: sameSec=true earlierMin=6ab8d8f490624a810aa6bf05 laterMin=6ab8d8f4c130cbf413e9d005 laterMax=6ab8d8f4c130cbf413e9d02c earlierMax=6ab8d8f490624a810aa6bf2c inverted=false fullyInverted=false
+round 7: sameSec=true earlierMin=6ab8d8f590624a810aa6bf2d laterMin=6ab8d8f575d267c7d85247a7 laterMax=6ab8d8f575d267c7d85247ce earlierMax=6ab8d8f590624a810aa6bf54 inverted=true fullyInverted=true
+round 8: sameSec=false earlierMin=6ab8d8f590624a810aa6bf55 laterMin=6ab8d8f6f9508f38df92288f laterMax=6ab8d8f6f9508f38df9228b6 earlierMax=6ab8d8f590624a810aa6bf7c inverted=false fullyInverted=false
+round 9: sameSec=true earlierMin=6ab8d8f690624a810aa6bf7d laterMin=6ab8d8f6c63dd4eaa2a62615 laterMax=6ab8d8f6c63dd4eaa2a6263c earlierMax=6ab8d8f690624a810aa6bfa4 inverted=false fullyInverted=false
+round 10: sameSec=false earlierMin=6ab8d8f690624a810aa6bfa5 laterMin=6ab8d8f7fbefd47041b2fcae laterMax=6ab8d8f7fbefd47041b2fcd5 earlierMax=6ab8d8f690624a810aa6bfcc inverted=false fullyInverted=false
+inversionRounds=2/10 (later-created process sorts before earlier-created process)
+=> within the same second, cross-process _id order is decided by each process's random prefix, so "bigger id == newer" does NOT hold across processes. This is why multi-writer deployments need a DB-backed medici_id_sequence (seconds+counter+instance) rather than per-process bson ids, else _id>$gt snapshot pagination silently mis-orders across writers.
+H4f DEMONSTRATED=true
+
+== H4g String vs Bytes recommendation ==
+ids stored as 24-char lowercase hex TEXT; SQLite default BINARY collation on TEXT = byte-wise = ObjectId order (proven H4a/H4b/H4e).
+Bytes(BLOB) would also sort byte-wise but: API JSON must hex-encode/decode at every boundary, $gt snapshot filters need Buffer->hex at the SQL edge, and indexes hold raw bytes.
+RECOMMENDATION: String (24-char lowercase hex), enforced lowercase at write (ObjectId.toHexString is already lowercase).
+done

@@ -1,0 +1,23 @@
+== S1 vanilla N=18 (insert -> upsert-increment -> aggregate read) ==
+{"N":18,"wall":131,"ok":18,"rejected":0,"finalB":18,"lockVersion":18,"errors":[],"errorCount":0}
+S1 PASS=true (ok=18/18, finalB=18, lockVersion=18, wall=131ms)
+
+== S4a N ladder, fast txns ==
+N=  1 ok=  1 rejected=  0 wall=     6ms perTxn=6.0ms finalB=1 lockVersion=1 errCount=0
+N=  2 ok=  2 rejected=  0 wall=    10ms perTxn=5.0ms finalB=2 lockVersion=2 errCount=0
+N=  4 ok=  4 rejected=  0 wall=    21ms perTxn=5.3ms finalB=4 lockVersion=4 errCount=0
+N=  8 ok=  8 rejected=  0 wall=    41ms perTxn=5.1ms finalB=8 lockVersion=8 errCount=0
+N= 18 ok= 18 rejected=  0 wall=    91ms perTxn=5.1ms finalB=18 lockVersion=18 errCount=0
+N= 32 ok= 32 rejected=  0 wall=   168ms perTxn=5.3ms finalB=32 lockVersion=32 errCount=0
+N= 64 ok= 64 rejected=  0 wall=   398ms perTxn=6.2ms finalB=64 lockVersion=64 errCount=0
+N=128 ok=128 rejected=  0 wall=   649ms perTxn=5.1ms finalB=128 lockVersion=128 errCount=0
+
+== S4b slow-writer ladder N=18 (in-txn delay), defaults maxWait=2000ms timeout=5000ms ==
+delay=100ms ok=18/18 rejected=0 wall=1911ms finalB=18 lockVersion=18 errors=[]
+delay=250ms ok=8/18 rejected=10 wall=2051ms finalB=8 lockVersion=8 errors=[["PrismaClientKnownRequestError/P2028",10]] first={"name":"PrismaClientKnownRequestError","code":"P2028","clientVersion":"7.10.0","meta":{},"message":"Transaction API error: Unable to start a transaction in the given time."}
+delay=400ms ok=5/18 rejected=13 wall=2039ms finalB=5 lockVersion=5 errors=[["PrismaClientKnownRequestError/P2028",13]] first={"name":"PrismaClientKnownRequestError","code":"P2028","clientVersion":"7.10.0","meta":{},"message":"Transaction API error: Unable to start a transaction in the given time."}
+delay=700ms ok=3/18 rejected=15 wall=2126ms finalB=3 lockVersion=3 errors=[["PrismaClientKnownRequestError/P2028",15]] first={"name":"PrismaClientKnownRequestError","code":"P2028","clientVersion":"7.10.0","meta":{},"message":"Transaction API error: Unable to start a transaction in the given time."}
+
+== S4c slow-writer with explicit {maxWait, timeout} options ==
+opts={"maxWait":60000,"timeout":60000} delay=400ms ok=18/18 rejected=0 wall=7335ms finalB=18 errors=none
+done

@@ -1,0 +1,14 @@
+== S5 xacid 18-way double-spend fidelity (seed +2, 18 concurrent spend -1 with in-txn balance check) ==
+ok=2 notEnoughBalance=16 otherErrors=0
+finalIncome=0 finalSavings=2 lockRows=1 lockVersion=2 journals=3 txRows=6
+S5 PASS=true (expect ok=2, notEnough=16, finalIncome=0, lockVersion=2)
+
+== S5b throw-inside-txn rolls back everything (spec 84-117) ==
+thrown={"name":"Error","message":"boom-mid-txn"}
+after-rollback: Income=2 journals=1 txRows=2 (expect 2 / 1 / 2 = seed only)
+S5b PASS=true
+
+== S5c partial commit (validation fail mid-commit) leaves zero rows of that entry ==
+journals before=1 after=1 (expect equal)
+S5c PASS=true
+done
