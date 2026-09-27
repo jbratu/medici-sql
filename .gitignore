@@ -1,8 +1,0 @@
-/node_modules
-/build
-/types
-/coverage
-/.nyc_output
-.idea
-.npmrc
-.DS_Store
