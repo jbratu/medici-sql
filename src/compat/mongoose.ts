@@ -23,14 +23,23 @@
  * - `Schema` with `.paths` (implicit `_id` included), `.index()` recording,
  *   and `Schema.Types.*` descriptor classes (QA M5: a bare
  *   `Schema.Types.ObjectId` is accepted as a path definition).
- * - `Model`/`Document` in the construction+validation shape only: `new
- *   Model(doc)` yields a Document with `_id` generated immediately (Entry.ts
- *   reads `this.journal._id` before the journal row exists), schema
- *   defaults applied, `validate()` rejecting with the `"<ModelName>
- *   validation failed: <path>: <reason>"` message shape (QA M6), and
- *   `toObject()`. The query surface (find/findOne/sort/lean/hydration) is
- *   ITD-101; `connection.transaction`/retry/ClientSession is ITD-102;
- *   `<model>.collection.*` is ITD-93.
+ * - `Model`/`Document` in the full construction+validation+query shape
+ *   (ITD-101): `new Model(doc)` yields a Document with `_id` generated
+ *   immediately (Entry.ts reads `this.journal._id` before the journal row
+ *   exists), schema defaults applied, `validate()` rejecting with the
+ *   `"<ModelName> validation failed: <path>: <reason>"` message shape (QA
+ *   M6), `toObject()`, `save()` (book.spec.ts:421) and `deleteOne()`
+ *   (balance.spec.ts:155). The query surface is delivered here too:
+ *   `find` / `findOne` / `deleteMany` return chainable, directly-awaitable
+ *   Queries (src/compat/query.ts) with both `.sort()` forms and `.lean()`,
+ *   hydrating rows with the QA M8 mapping (src/compat/hydration.ts) —
+ *   `.lean()` returns plain objects that still carry hydrated types.
+ *   `init()` / `syncIndexes()` are no-ops (index DDL is Prisma's, ITD-90);
+ *   `diffIndexes()` returns the sanctioned minimal shape (QA R4).
+ *   `connection.transaction`/retry/ClientSession is ITD-102; the concrete
+ *   `<model>.collection.*` implementation is ITD-93 (the property is
+ *   defined and settable here; until ITD-93 wires it, every operation on
+ *   the default collection fails loudly).
  * - `connection.models` / `connection.deleteModel` / `model()` so the
  *   verbatim setXSchema registration (and deleteModel + re-register
  *   round trips, QA M6) works.
@@ -42,6 +51,8 @@
 import { ObjectId as BsonObjectId } from "bson";
 import type { IAnyObject } from "../IAnyObject";
 import { UnsupportedMongoOperationError } from "../errors/UnsupportedMongoOperationError";
+import type { QueryHost } from "./query";
+import { Query } from "./query";
 
 // Namespace (not ES module syntax) on purpose: it mirrors mongoose's
 // `Types.ObjectId` shape, which the verbatim code references in type positions.
@@ -370,6 +381,14 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
     }
 
     /**
+     * ITD-93 installs the real driver-shaped adapter here (unit tests
+     * install fakes). Until then the getter returns the loud-failure proxy.
+     */
+    static set collection(collection: Collection<any>) {
+      collectionCache = collection;
+    }
+
+    /**
      * Sanctioned minimal diff (QA R4): index DDL is Prisma's job and the
      * upstream test asserting specific diff contents is a Tier C carve-out.
      */
@@ -377,8 +396,58 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
       return { toDrop: [], toCreate: [] };
     }
 
+    /**
+     * No-op: table and index DDL are owned by Prisma (`prisma db push`,
+     * ITD-90); the verbatim helper/initModels.ts awaits this per model.
+     */
+    static init(): Promise<void> {
+      return Promise.resolve();
+    }
+
+    /**
+     * No-op: index DDL is Prisma's job (ITD-90); the verbatim
+     * helper/syncIndexes.ts awaits this per model with `{ background }`
+     * options, which are accepted and ignored.
+     */
     static syncIndexes(): Promise<void> {
-      throw new UnsupportedMongoOperationError(`${name}.syncIndexes (index synchronization, ITD-101)`);
+      return Promise.resolve();
+    }
+
+    /**
+     * Chainable, directly-awaitable query (both `.sort()` forms, `.lean()`,
+     * `.exec()`, bare `await`). Returns hydrated Documents by default
+     * (src/compat/query.ts).
+     */
+    static find(filter?: IAnyObject): Query {
+      return new Query(this as unknown as QueryHost, "find", filter ?? {});
+    }
+
+    static findOne(filter?: IAnyObject): Query {
+      return new Query(this as unknown as QueryHost, "findOne", filter ?? {});
+    }
+
+    /**
+     * `M.create(doc)` — builds the document (generating `_id` when absent)
+     * and inserts it through the adapter; resolves to the document
+     * (balance.spec.ts:159 recreates a transaction with `_id` deleted).
+     */
+    static create(doc?: IAnyObject, options?: IAnyObject): Promise<any> {
+      const instance = new CompatModelConstructor(doc);
+      const values: IAnyObject = {};
+      for (const [key, value] of Object.entries(instance)) {
+        if (typeof value !== "function" && value !== undefined) {
+          values[key] = value;
+        }
+      }
+      return (CompatModelConstructor.collection.insertOne(values, options) as Promise<any>).then(() => instance);
+    }
+
+    /**
+     * Chainable, directly-awaitable; returns the adapter's delete result
+     * (book.spec.ts:615 awaits it bare, xacid.spec.ts:494 calls `.exec()`).
+     */
+    static deleteMany(filter?: IAnyObject): Query {
+      return new Query(this as unknown as QueryHost, "deleteMany", filter ?? {});
     }
 
     constructor(doc?: IAnyObject) {
@@ -450,12 +519,26 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
       return out;
     }
 
-    save(): Promise<never> {
-      return Promise.reject(new UnsupportedMongoOperationError("Document.save (collection adapter, ITD-93)"));
+    /**
+     * Persist the current field values under `_id` via the adapter
+     * (book.spec.ts:331/353/421 mutate a field and `await doc.save()`).
+     * Values are passed to the adapter as-is; per-model encoding is ITD-93.
+     */
+    save(options?: IAnyObject): Promise<this> {
+      const set: IAnyObject = {};
+      for (const [key, value] of Object.entries(this)) {
+        if (key !== "_id" && typeof value !== "function") {
+          set[key] = value;
+        }
+      }
+      return (CompatModelConstructor.collection.updateOne({ _id: (this as any)._id }, { $set: set }, options) as Promise<any>).then(
+        () => this
+      );
     }
 
-    deleteOne(): Promise<never> {
-      return Promise.reject(new UnsupportedMongoOperationError("Document.deleteOne (collection adapter, ITD-93)"));
+    /** Remove this document (balance.spec.ts:155). */
+    deleteOne(options?: IAnyObject): Promise<any> {
+      return CompatModelConstructor.collection.deleteOne({ _id: (this as any)._id }, options);
     }
   }
 
@@ -529,17 +612,28 @@ export interface Collection<T = any> {
 /**
  * Model-shaped surface. The verbatim code constructs documents
  * (`new transactionModel(tx)`) and uses `.collection`; the index signature
- * is a catch-all for the ITD-101/93 surface.
+ * stays as a catch-all for the ITD-93 surface.
  */
 export interface Model<T = any> {
   new (doc?: any): any;
   collection: Collection<T>;
+  modelName: string;
+  schema: Schema;
+  find(filter?: any): Query;
+  findOne(filter?: any): Query;
+  create(doc?: any, options?: any): Promise<any>;
+  deleteMany(filter?: any): Query;
+  init(options?: any): Promise<void>;
+  syncIndexes(options?: any): Promise<void>;
+  diffIndexes(): { toDrop: string[]; toCreate: string[] };
   [key: string]: any;
 }
 
 export interface Document {
   validate(options?: any): Promise<any>;
   toObject(options?: any): any;
+  save(options?: any): Promise<any>;
+  deleteOne(options?: any): Promise<any>;
   [key: string]: any;
 }
 
