@@ -8,14 +8,14 @@ changes behavior, update this file in the same commit.
 
 Pinned and measured by the ITD-89 spike (`spike/FINDINGS.md`):
 
-| Package | Version | Note |
-| --- | --- | --- |
-| prisma / @prisma/client | 7.10.0 | exact pins in `package.json` |
-| @prisma/adapter-better-sqlite3 | 7.10.0 | the only SQLite path in Prisma 7 |
-| @prisma/client-runtime-utils | 7.10.0 | required at runtime by the generated client (`runtime/client.js`) |
-| better-sqlite3 | 13.0.3 | bundles **SQLite 3.53.4** |
-| bson | 7.3.3 | the only package we take from the mongo ecosystem |
-| node (measured) | v24.14.0 | engines `>=20` |
+| Package                        | Version  | Note                                                              |
+| ------------------------------ | -------- | ----------------------------------------------------------------- |
+| prisma / @prisma/client        | 7.10.0   | exact pins in `package.json`                                      |
+| @prisma/adapter-better-sqlite3 | 7.10.0   | the only SQLite path in Prisma 7                                  |
+| @prisma/client-runtime-utils   | 7.10.0   | required at runtime by the generated client (`runtime/client.js`) |
+| better-sqlite3                 | 13.0.3   | bundles **SQLite 3.53.4**                                         |
+| bson                           | 7.3.3    | the only package we take from the mongo ecosystem                 |
+| node (measured)                | v24.14.0 | engines `>=20`                                                    |
 
 SQLite ≥ 3.43 `SUM` uses Kahan–Babuška–Neumaier extended-precision
 accumulation, which is **not bit-identical to JS left-to-right addition**.
@@ -171,7 +171,7 @@ it with the real compat core.
   connection makes background outer-client calls piggyback on the open
   transaction.
 - `aggregate` over an empty match returns `{ _sum: {...nulls}, _count: 0
-  }` — map `_count === 0` to "no row" (Book.ts:129 guards on the row).
+}` — map `_count === 0` to "no row" (Book.ts:129 guards on the row).
 
 ## Transaction boundary as implemented (compat core C, ITD-102)
 
@@ -197,7 +197,7 @@ is the only addition there so far).
   `retries: 0` = exactly one attempt), `retryBaseDelayMs` (50),
   `retryMaxDelayMs` (2000). Backoff: `min(cap, base * 2^(attempt-1))`
   × uniform 0.5–1.5 jitter.
-- **Retriable:** P2028 *with* the "Unable to start a transaction" message
+- **Retriable:** P2028 _with_ the "Unable to start a transaction" message
   (in-process start-queue timeout), any error whose
   `cause.originalCode` is `SQLITE_BUSY`/`SQLITE_LOCKED` (cross-process
   write contention), or `cause.kind === "SocketTimeout"`. **Never
@@ -309,6 +309,6 @@ better-sqlite3 13.0.3):
   unguarded paths because a `json_extract` result is always valid JSON
   text or `NULL`, so the strict functions can never see a bare string.
 - JSON path syntax: object keys join with dots, array indexes must be
-  bracketed (`$.tags[0]`); bracket *string* keys (`$.["a"]`) are rejected
+  bracketed (`$.tags[0]`); bracket _string_ keys (`$.["a"]`) are rejected
   by SQLite, and a dot-digit on an object is a key lookup — hence all-digit
   meta path segments take the array-index form.

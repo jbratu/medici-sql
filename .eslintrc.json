@@ -50,6 +50,7 @@
       "files": [
         "spec/constructKey.spec.ts",
         "spec/extractObjectIdKeysFromSchema.spec.ts",
+        "spec/filterTranslator.spec.ts",
         "spec/handleVoidMemo.spec.ts",
         "spec/parseBalanceQuery.spec.ts",
         "spec/parseDateField.spec.ts",
