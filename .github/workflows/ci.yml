@@ -1,32 +1,47 @@
 name: CI
-on: [push, pull_request]
-jobs:
-  test:
-    name: Node ${{ matrix.node }}, Mongo ${{ matrix.mongodb-version }}, on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        node: [16, 18, 20]
-        mongodb-version: [4.0, 4.2, 4.4, 5.0, 6.0]
-    steps:
-      - uses: actions/checkout@v3
 
-      - name: Setup Node.js v${{ matrix.node }}
-        uses: actions/setup-node@v3
+# Port CI for the SQL (Prisma/SQLite) port. No MongoDB service container and no
+# mongoose matrix — the port never talks to Mongo. The build/test job activates
+# once the Prisma scaffold lands (prisma/schema.prisma, [ITD-90]); until then
+# it reports "skipping" instead of failing on dead config.
+
+on:
+  push:
+    branches: [master, feature/api-compatible-sql]
+  pull_request:
+    branches: [feature/api-compatible-sql]
+  workflow_dispatch: {}
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-
-      - name: Start MongoDB v${{ matrix.mongodb-version }}
-        uses: supercharge/mongodb-github-action@1.8.0
-        with:
-          mongodb-version: ${{ matrix.mongodb-version }}
-          mongodb-replica-set: test-rs
-
-      # ignoring scripts to not install mongodb-memory-server
-      - run: npm ci --ignore-scripts
-      - run: npm run ci
-      - run: npm run ci-mongoose5
-      - run: npm run ci-mongoose6
-      - run: npm run ci-mongoose7
-      - run: npm run ci-mongoose8
+          cache: npm
+      - name: Scaffold check
+        id: scaffold
+        run: |
+          if [ -f prisma/schema.prisma ]; then
+            echo "scaffold=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "scaffold=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install
+        if: steps.scaffold.outputs.scaffold == 'true'
+        run: npm ci
+      - name: Build + test
+        if: steps.scaffold.outputs.scaffold == 'true'
+        run: |
+          # Standard script names assumed to land with the scaffold (ITD-90/91).
+          npm run build
+          npm test
+      - name: Skip (scaffold not landed yet)
+        if: steps.scaffold.outputs.scaffold == 'false'
+        run: echo "Prisma scaffold (ITD-90) not landed yet — nothing to build or test."

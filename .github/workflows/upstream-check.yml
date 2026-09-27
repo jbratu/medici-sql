@@ -1,0 +1,69 @@
+name: upstream-check
+
+# Upstream drift monitor (ITD-98). Runs `npm run upstream:check` — see
+# upstream/RECONCILING.md for the full reconciliation procedure.
+#
+# - PRs to feature/api-compatible-sql: the check is a gate (job must go green).
+# - Pushes to any branch + weekly schedule: on failure the workflow opens (or
+#   comments on) a GitHub issue labeled `upstream-drift` instead of just
+#   reddening an unowned cron. Make this a *required* status check via branch
+#   protection on the GitHub repo (owner action; not settable from an agent run).
+#
+# Note: GitHub evaluates `schedule` on the default branch, so the weekly cron
+# activates once this branch is merged / becomes default. Until then, the weekly
+# run is the Paperclip routine registered by the operator (ITD-98).
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [feature/api-compatible-sql]
+  workflow_dispatch: {}
+
+jobs:
+  upstream-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Run upstream drift check
+        id: check
+        continue-on-error: true
+        run: npm run upstream:check
+      - name: Open/update upstream-drift issue
+        if: always() && steps.check.outcome == 'failure' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "## Upstream drift detected"
+            echo
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "Trigger: ${{ github.event_name }} on ${{ github.ref_name }}"
+            echo
+            if [ -f upstream-check-report.md ]; then
+              cat upstream-check-report.md
+            else
+              echo "(no report file was generated — the check failed operationally; see run logs)"
+            fi
+          } > .drift-body.md
+          ISSUE=$(gh issue list --repo "$GITHUB_REPOSITORY" --label upstream-drift --state open --json number --jq '.[0].number // empty')
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file .drift-body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --label upstream-drift \
+              --title "Upstream drift: medici moved past the pinned SHA" \
+              --body-file .drift-body.md
+          fi
+      - name: Fail job on drift
+        if: always() && steps.check.outcome == 'failure'
+        run: exit 1

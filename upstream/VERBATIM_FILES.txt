@@ -1,0 +1,21 @@
+# Files copied VERBATIM from upstream (flash-oss/medici) — byte-identical to the
+# pinned SHA (upstream/PINNED_SHA). This is the non-negotiable contract of the
+# port: upstream src/ business logic is copied, not rewritten.
+#
+# A line is an exact path or a directory prefix ending in "/".
+# The drift monitor (`npm run upstream:check`, class B) diffs our copies against
+# upstream at the new ref. Upstream-only movement while our copy still matches
+# the pin is a "clean fast-forward" (informational); anything else is drift.
+#
+# When bumping the pin: re-copy with `npm run upstream:baseline <sha>` and
+# commit the re-copied files together with the matrix + provenance + surface.
+src/Book.ts
+src/Entry.ts
+src/IAnyObject.ts
+src/errors/
+src/helper/parse/
+src/helper/addReversedTransactions.ts
+src/helper/flattenObject.ts
+src/helper/handleVoidMemo.ts
+src/helper/isPrototypeAttribute.ts
+src/helper/safeSetKeyToMetaObject.ts

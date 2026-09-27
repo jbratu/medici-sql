@@ -1,0 +1,8 @@
+node_modules/
+types/
+build/
+coverage/
+*.db
+*.sqlite
+upstream-check.report.json
+upstream-check-report.md

@@ -1,0 +1,16 @@
+{
+  "name": "medici-sql",
+  "version": "0.0.0",
+  "private": true,
+  "description": "API-compatible SQL (Prisma/SQLite) port of medici (flash-oss/medici). Upstream drift tooling: see upstream/RECONCILING.md.",
+  "scripts": {
+    "upstream:check": "node scripts/upstream-check.mjs",
+    "upstream:baseline": "node scripts/upstream-baseline.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.1.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
