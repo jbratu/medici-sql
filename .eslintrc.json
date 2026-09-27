@@ -44,5 +44,21 @@
     "types/",
     "src/generated/",
     "spike/"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "spec/constructKey.spec.ts",
+        "spec/extractObjectIdKeysFromSchema.spec.ts",
+        "spec/handleVoidMemo.spec.ts",
+        "spec/parseBalanceQuery.spec.ts",
+        "spec/parseDateField.spec.ts",
+        "spec/parseFilterQuery.spec.ts",
+        "spec/safeSetKeyToMetaObject.spec.ts"
+      ],
+      "rules": {
+        "import/namespace": "off"
+      }
+    }
   ]
 }

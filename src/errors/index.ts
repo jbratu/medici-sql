@@ -5,3 +5,4 @@ export { InvalidAccountPathLengthError } from "./InvalidAccountPathLengthError";
 export { JournalAlreadyVoidedError } from "./JournalAlreadyVoidedError";
 export { JournalNotFoundError } from "./JournalNotFoundError";
 export { TransactionError } from "./TransactionError";
+export { UnsupportedMongoOperationError } from "./UnsupportedMongoOperationError";
