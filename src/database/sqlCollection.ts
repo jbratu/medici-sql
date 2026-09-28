@@ -57,6 +57,7 @@
  * ASC (insertion order) as well.
  */
 import { ObjectId } from "bson";
+import type { PrismaClient } from "../generated";
 import { IAnyObject } from "../IAnyObject";
 import { Types, castValue } from "../compat/mongoose";
 import type { Schema } from "../compat/mongoose";
@@ -66,51 +67,37 @@ import { ensureSchemaLazy } from "./schema";
 import { COLUMN_KINDS, CollectionName, SqlPredicate, translateFilter } from "./filterTranslator";
 import { storedDateTime } from "./filterTranslator";
 import { allocateTransactionIds } from "./idSequence";
-import { ClientSession, ItxClient, PrismaClientView } from "./session";
+import { PrismaClientView } from "./session";
+import type {
+  DeleteResult,
+  InsertManyResult,
+  InsertOneResult,
+  SqlCollection,
+  SqlCollectionOptions,
+  UpdateResult,
+} from "./connectionTypes";
+// Re-exported so existing importers (specs, src/index graph) keep working.
+export type {
+  DeleteResult,
+  InsertManyResult,
+  InsertOneResult,
+  SqlCollection,
+  SqlCollectionOptions,
+  UpdateResult,
+} from "./connectionTypes";
 
-export interface SqlCollectionOptions {
-  session?: ClientSession;
-  [key: string]: unknown;
-}
+/**
+ * The Prisma interactive-transaction client type: what `prisma.$transaction`
+ * passes to its callback (the full client minus the lifecycle methods).
+ * A full PrismaClient is assignable to it, so both the session's tx client
+ * and the singleton client satisfy every method in this layer. Defined here
+ * (not in ./session) so the generated Prisma d.ts stays out of the tsd
+ * program — see the note in session.ts (ITD-97).
+ */
+export type ItxClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$use" | "$extends">;
 
-export interface InsertOneResult {
-  acknowledged: true;
-  insertedId: Types.ObjectId;
-}
-
-export interface InsertManyResult {
-  acknowledged: true;
-  insertedIds: Record<string, Types.ObjectId>;
-  insertedCount: number;
-}
-
-export interface UpdateResult {
-  acknowledged: true;
-  matchedCount: number;
-  modifiedCount: number;
-  upsertedId?: Types.ObjectId;
-}
-
-export interface DeleteResult {
-  acknowledged: true;
-  deletedCount: number;
-}
-
-/** Public surface of the collection (kept interface-typed so the bundled d.ts stays small). */
-export interface SqlCollection {
-  insertOne(doc: IAnyObject, options?: SqlCollectionOptions): Promise<InsertOneResult>;
-  insertMany(docs: IAnyObject | IAnyObject[], options?: SqlCollectionOptions): Promise<InsertManyResult>;
-  updateOne(filter: IAnyObject, update: IAnyObject, options?: SqlCollectionOptions): Promise<UpdateResult>;
-  updateMany(filter: IAnyObject, update: IAnyObject, options?: SqlCollectionOptions): Promise<UpdateResult>;
-  upsert(filter: IAnyObject, update: IAnyObject, options?: SqlCollectionOptions): Promise<UpdateResult>;
-  find(filter?: IAnyObject, options?: SqlCollectionOptions): { toArray(): Promise<IAnyObject[]> };
-  findOne(filter?: IAnyObject, options?: SqlCollectionOptions): Promise<IAnyObject | null>;
-  countDocuments(filter?: IAnyObject, options?: SqlCollectionOptions): Promise<number>;
-  deleteOne(filter: IAnyObject, options?: SqlCollectionOptions): Promise<DeleteResult>;
-  deleteMany(filter: IAnyObject, options?: SqlCollectionOptions): Promise<DeleteResult>;
-  aggregate(pipeline?: IAnyObject[], options?: SqlCollectionOptions): { toArray(): Promise<IAnyObject[]> };
-  distinct(field: string, filter?: IAnyObject, options?: SqlCollectionOptions): Promise<unknown[]>;
-}
+// Public surface types (SqlCollection, SqlCollectionOptions, *Result) live in
+// ./connectionTypes (ITD-97) — see the note in that module.
 
 /** Document-visible columns per table (in DDL order). The denormalized account_path_N columns are filter-only (QA G6) and never appear in documents. */
 const TABLE_COLUMNS: Record<CollectionName, string[]> = {

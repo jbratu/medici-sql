@@ -25,12 +25,14 @@ expectType<Promise<string[]>>(session.allocateTransactionIds(3));
 expectType<Promise<string>>(session.nextTransactionId());
 expectType<void>(session.close());
 
-// connection.transaction / mongoTransaction: generic callback, loose options.
+// connection.transaction: generic callback, loose options, pass-through result.
 declare const fn: (session: ClientSession) => Promise<number>;
 expectType<Promise<number>>(connection.transaction(fn));
 expectType<Promise<number>>(connection.transaction(fn, { maxWait: 100, timeout: 5000, retries: 3 }));
-expectType<Promise<number>>(mongoTransaction(fn));
-expectType<Promise<number>>(mongoTransaction(fn, { retries: 0 }));
+
+// mongoTransaction: upstream contract is Promise<void> (ITD-97 parity).
+expectType<Promise<void>>(mongoTransaction(fn));
+expectType<Promise<void>>(mongoTransaction(fn, { retries: 0 }));
 
 // Database-layer errors (src/database/errors.ts; src/errors/ stays verbatim).
 const closed = new SessionClosedError();

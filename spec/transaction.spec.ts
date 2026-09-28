@@ -565,7 +565,9 @@ describe("connection.transaction (ITD-102, compat core C)", function () {
       return "aliased";
     }, {});
 
-    expect(result).to.equal("aliased");
+    // Upstream contract: mongoTransaction resolves void, not the callback's
+    // return value (ITD-97 type parity with upstream's Promise<void>).
+    expect(result).to.equal(undefined);
     expect(await txCol.countDocuments({ _journal: journalId })).to.equal(1);
   });
 

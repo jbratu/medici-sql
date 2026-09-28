@@ -53,6 +53,7 @@ import type { IAnyObject } from "../IAnyObject";
 import { UnsupportedMongoOperationError } from "../errors/UnsupportedMongoOperationError";
 import type { QueryHost } from "./query";
 import { Query } from "./query";
+import type { MediciConnection, SqlCollection } from "../database/connectionTypes";
 
 // Namespace (not ES module syntax) on purpose: it mirrors mongoose's
 // `Types.ObjectId` shape, which the verbatim code references in type positions.
@@ -378,10 +379,18 @@ function resolveWiredCollection(
   if (!WIRED_TABLES.has(table)) {
     return makeUnwiredCollection(modelName);
   }
+  // Structural casts (not `typeof import(...)`): a type-level import of
+  // these runtime modules would pull the generated Prisma client d.ts into
+  // the tsd type-test program (ITD-97).
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { createSqlCollection } = require("../database/sqlCollection") as typeof import("../database/sqlCollection");
+  const { createSqlCollection } = require("../database/sqlCollection") as {
+    createSqlCollection: (singleton: any, name: string, schema?: Schema) => SqlCollection;
+  };
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { currentSingletonUrl, getPrismaClient } = require("../database/client") as typeof import("../database/client");
+  const { currentSingletonUrl, getPrismaClient } = require("../database/client") as {
+    currentSingletonUrl: () => string | undefined;
+    getPrismaClient: (url?: string) => any;
+  };
   // Follow the CURRENT singleton, not the default URL: after
   // initialize({ databaseUrl }) (or connection.connect(url)) the active
   // database is the one the singleton points at. A bare getPrismaClient()
@@ -415,7 +424,9 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
         return explicitCollection;
       }
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { currentSingletonUrl } = require("../database/client") as typeof import("../database/client");
+      const { currentSingletonUrl } = require("../database/client") as {
+        currentSingletonUrl: () => string | undefined;
+      };
       const url = currentSingletonUrl();
       if (!lazyCollection || lazyCollection.url !== url) {
         lazyCollection = { url, collection: resolveWiredCollection(name, collection, s) };
@@ -607,13 +618,16 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
 // `deleteModel` / `model`) plus the port's transaction boundary (ITD-102,
 // src/database/connection). The transaction-bound members are bound lazily —
 // a top-level import of ../database/connection would create a runtime cycle
-// (connection → sqlCollection → this module), the same reason the model
-// collection getter above uses `require`.
+// (connection → sqlCollection → this module), the same reason the getters
+// below use `require`. The static type is MediciConnection, imported from
+// ./connectionTypes (a type-only module): naming the live connection module
+// here, even in a type position, would pull its generated-Prisma import
+// graph into the tsd type-test program (ITD-97).
 export const connection: {
   models: Record<string, any>;
   deleteModel(name: string): any;
   model: typeof model;
-} & typeof import("../database/connection")["connection"] = {
+} & MediciConnection = {
   models: {},
   deleteModel(name) {
     const m = connection.models[name];
@@ -623,27 +637,27 @@ export const connection: {
   model,
   get transaction() {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    const { connection: dbConnection } = require("../database/connection") as { connection: MediciConnection };
     return dbConnection.transaction.bind(dbConnection) as any;
   },
   get connect() {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    const { connection: dbConnection } = require("../database/connection") as { connection: MediciConnection };
     return dbConnection.connect.bind(dbConnection) as any;
   },
   get disconnect() {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    const { connection: dbConnection } = require("../database/connection") as { connection: MediciConnection };
     return dbConnection.disconnect.bind(dbConnection) as any;
   },
   get collection() {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    const { connection: dbConnection } = require("../database/connection") as { connection: MediciConnection };
     return dbConnection.collection.bind(dbConnection) as any;
   },
   get db() {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    const { connection: dbConnection } = require("../database/connection") as { connection: MediciConnection };
     return dbConnection.db;
   },
 };

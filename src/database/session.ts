@@ -1,14 +1,11 @@
-import type { PrismaClient } from "../generated";
 import { SessionClosedError } from "./errors";
 import { allocateTransactionIds as allocateOnClient } from "./idSequence";
 
-/**
- * The Prisma interactive-transaction client type: what `prisma.$transaction`
- * passes to its callback (the full client minus the lifecycle methods).
- * A full PrismaClient is assignable to it, so both the session's tx client
- * and the singleton client satisfy every method in this layer.
- */
-export type ItxClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$use" | "$extends">;
+// NOTE: this module must not import from "../generated" (ITD-97): the spec
+// type tests (tsd) pull this file in via the "mongoose" compat alias, and the
+// generated multi-file Prisma client d.ts does not type-check under the older
+// TypeScript that tsd bundles. The `ItxClient` alias lives in sqlCollection.ts
+// (the only consumer), which is not part of the tsd program.
 
 /**
  * The structural view of the Prisma client this package's public types are
@@ -45,8 +42,13 @@ export interface PrismaClientView {
  *   reject, and must not leave an unhandled rejection.
  */
 export class ClientSession {
-  private _client: PrismaClientView | undefined;
-  private _closed = false;
+  // Deliberately NOT `private` (ITD-97): the public bundle (types/index.d.ts)
+  // inlines this class, and classes with private members are nominal in
+  // TypeScript — the inlined copy and this declaration would then be
+  // mutually unassignable, breaking the vendored spec's `session` option.
+  // Underscore-prefixed internal state; treat as read-only from outside.
+  _client: PrismaClientView | undefined;
+  _closed = false;
 
   get closed(): boolean {
     return this._closed;

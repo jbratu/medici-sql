@@ -26,6 +26,8 @@
     "db:sync-ddl": "node scripts/sync-ddl.mjs",
     "upstream:check": "node scripts/upstream-check.mjs",
     "upstream:baseline": "node scripts/upstream-baseline.mjs",
+    "surface:report": "node scripts/surface-report.mjs",
+    "surface:check": "node scripts/surface-report.mjs --check",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
     "prepublishOnly": "npm run build"
   },
@@ -98,7 +100,13 @@
     "compilerOptions": {
       "esModuleInterop": false,
       "module": "commonjs",
-      "target": "ES2017"
+      "target": "ES2017",
+      "skipLibCheck": true,
+      "baseUrl": ".",
+      "paths": {
+        "mongoose": ["src/compat/mongoose.ts"],
+        "mongodb": ["src/compat/mongodb.ts"]
+      }
     }
   },
   "engines": {

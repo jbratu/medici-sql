@@ -2,48 +2,21 @@ import { IAnyObject } from "../IAnyObject";
 import { connectPrisma, currentSingletonUrl, databaseUrl, disconnectPrisma, getPrismaClient } from "./client";
 import { ClientSession } from "./session";
 import { parseTransactionOptions, runWithRetry } from "./transaction";
-import { createSqlCollection, SqlCollection } from "./sqlCollection";
+import { createSqlCollection } from "./sqlCollection";
 import { ensureSchemaLazy } from "./schema";
+import type { MediciConnection, SqlCollection } from "./connectionTypes";
+export type { MediciConnection } from "./connectionTypes";
 
 /**
  * The connection object — the port's transaction boundary (ITD-102, compat
- * core C). Mirrors the client-facing `mongoose.connection` surface the
- * upstream specs and Book/Entry flows use:
- *
- *   connection.transaction(fn, options?)  — retrying interactive transaction
- *   connection.connect(url?) / .disconnect()
- *   connection.db.collection(name)        — collection accessor
- *
- * `transaction` opens a Prisma interactive transaction on the singleton
- * client, passes a ClientSession to `fn`, commits on resolve, rolls back on
- * throw, and retries on SQLite write contention per the ITD-89 spike
- * (spike/FINDINGS.md section d): retriable errors only (P2028 start timeout,
- * cause-SQLITE_BUSY/LOCKED), exponential backoff with jitter, max 5
- * attempts, and the original error is re-thrown when retries are exhausted.
+ * core C). `MediciConnection` (the public contract) lives in
+ * ./connectionTypes — a type-only module — so the tsd type-test program can
+ * name it without pulling the generated Prisma client d.ts in (ITD-97).
  *
  * Module-load purity (QA S3): constructing this object does no I/O; the
  * Prisma client (and its SQLite file) are created lazily on the first
  * connect()/transaction() call.
  */
-
-export interface MediciConnection {
-  /** Connect the singleton client, applying the port pragmas (WAL once, synchronous=NORMAL per connect). A different url rebuilds the singleton. */
-  connect(url?: string): Promise<void>;
-  /** Disconnect and forget the singleton (test teardown). */
-  disconnect(): Promise<void>;
-  /**
-   * Run `fn` inside an interactive transaction. `fn` receives the
-   * ClientSession (route writes through `session.client` / pass the session
-   * to adapter methods). Commits on resolve, rolls back on throw, retries
-   * per the spike's policy (options: maxWait, timeout, retries,
-   * retryBaseDelayMs, retryMaxDelayMs — loose IAnyObject, unknown keys ignored).
-   */
-  transaction<T>(fn: (session: ClientSession) => Promise<T>, options?: IAnyObject): Promise<T>;
-  /** Collection accessor for the four medici collections (interim adapter, ITD-92/93 extend it). */
-  collection(name: string): SqlCollection;
-  /** Mongoose-shaped `connection.db` handle. */
-  readonly db: { name: string; collection(name: string): SqlCollection };
-}
 
 class Connection implements MediciConnection {
   private _db: { name: string; collection: (name: string) => SqlCollection } | undefined;

@@ -1,0 +1,212 @@
+{
+  "format": "medici-sql/api-surface/v1",
+  "upstream": {
+    "remote": "https://github.com/jbratu/medici-sql",
+    "sha": "388315b518865ff01421244bd27828f184415c51",
+    "ref": "feature/api-compatible-sql"
+  },
+  "source": "types/index.d.ts (dts-bundle-generator from src/index.ts, package.json \"build:types\")",
+  "exports": [
+    {
+      "name": "IAnyObject",
+      "kind": "interface",
+      "signature": "export interface IAnyObject { [k: string]: any; }"
+    },
+    {
+      "name": "PrismaClientView",
+      "kind": "interface",
+      "signature": "export interface PrismaClientView { transaction: any; journal: any; lock: any; balance: any; idSequence: any; $queryRawUnsafe<T>(query: string, ...values: unknown[]): Promise<T>; $executeRawUnsafe(query: string, ...values: unknown[]): Promise<number>; }"
+    },
+    {
+      "name": "ClientSession",
+      "kind": "class",
+      "signature": "export declare class ClientSession { _client: PrismaClientView | undefined; _closed: boolean; get closed(): boolean; attach(client: PrismaClientView): void; get client(): PrismaClientView; close(): void; allocateTransactionIds(count: number): Promise<string[]>; nextTransactionId(): Promise<string>; }"
+    },
+    {
+      "name": "SqlCollectionOptions",
+      "kind": "interface",
+      "signature": "export interface SqlCollectionOptions { session?: ClientSession; [key: string]: unknown; }"
+    },
+    {
+      "name": "InsertOneResult",
+      "kind": "interface",
+      "signature": "export interface InsertOneResult { acknowledged: true; insertedId: Types.ObjectId; }"
+    },
+    {
+      "name": "InsertManyResult",
+      "kind": "interface",
+      "signature": "export interface InsertManyResult { acknowledged: true; insertedIds: Record<string, Types.ObjectId>; insertedCount: number; }"
+    },
+    {
+      "name": "UpdateResult",
+      "kind": "interface",
+      "signature": "export interface UpdateResult { acknowledged: true; matchedCount: number; modifiedCount: number; upsertedId?: Types.ObjectId; }"
+    },
+    {
+      "name": "DeleteResult",
+      "kind": "interface",
+      "signature": "export interface DeleteResult { acknowledged: true; deletedCount: number; }"
+    },
+    {
+      "name": "SqlCollection",
+      "kind": "interface",
+      "signature": "export interface SqlCollection { insertOne(doc: IAnyObject, options?: SqlCollectionOptions): Promise<InsertOneResult>; insertMany(docs: IAnyObject | IAnyObject[], options?: SqlCollectionOptions): Promise<InsertManyResult>; updateOne(filter: IAnyObject, update: IAnyObject, options?: SqlCollectionOptions): Promise<UpdateResult>; updateMany(filter: IAnyObject, update: IAnyObject, options?: SqlCollectionOptions): Promise<UpdateResult>; upsert(filter: IAnyObject, update: IAnyObject, options?: SqlCollectionOptions): Promise<UpdateResult>; find(filter?: IAnyObject, options?: SqlCollectionOptions): { toArray(): Promise<IAnyObject[]>; }; findOne(filter?: IAnyObject, options?: SqlCollectionOptions): Promise<IAnyObject | null>; countDocuments(filter?: IAnyObject, options?: SqlCollectionOptions): Promise<number>; deleteOne(filter: IAnyObject, options?: SqlCollectionOptions): Promise<DeleteResult>; deleteMany(filter: IAnyObject, options?: SqlCollectionOptions): Promise<DeleteResult>; aggregate(pipeline?: IAnyObject[], options?: SqlCollectionOptions): { toArray(): Promise<IAnyObject[]>; }; distinct(field: string, filter?: IAnyObject, options?: SqlCollectionOptions): Promise<unknown[]>; }"
+    },
+    {
+      "name": "MediciConnection",
+      "kind": "interface",
+      "signature": "export interface MediciConnection { connect(url?: string): Promise<void>; disconnect(): Promise<void>; transaction<T>(fn: (session: ClientSession) => Promise<T>, options?: IAnyObject): Promise<T>; collection(name: string): SqlCollection; readonly db: { name: string; collection(name: string): SqlCollection; }; }"
+    },
+    {
+      "name": "Document",
+      "kind": "interface",
+      "signature": "export interface Document { validate(options?: any): Promise<any>; toObject(options?: any): any; save(options?: any): Promise<any>; deleteOne(options?: any): Promise<any>; [key: string]: any; }"
+    },
+    {
+      "name": "ITransaction",
+      "kind": "interface",
+      "signature": "export interface ITransaction { _id?: Types.ObjectId; credit: number; debit: number; meta?: IAnyObject; datetime: Date; account_path: string[]; accounts: string; book: string; memo: string; _journal: Types.ObjectId; timestamp: Date; voided?: boolean; void_reason?: string; _original_journal?: Types.ObjectId; }"
+    },
+    {
+      "name": "setTransactionSchema",
+      "kind": "function",
+      "signature": "export declare function setTransactionSchema(schema: Schema, collection?: string, options?: { defaultIndexes: boolean; }): void;"
+    },
+    {
+      "name": "IFilterQuery",
+      "kind": "type",
+      "signature": "export type IFilterQuery = { account?: string | string[]; _journal?: Types.ObjectId | string; start_date?: Date | string | number; end_date?: Date | string | number; } & Partial<ITransaction> & { [key: string]: string[] | number | string | Date | boolean | Types.ObjectId; };"
+    },
+    {
+      "name": "IPaginationQuery",
+      "kind": "interface",
+      "signature": "export interface IPaginationQuery { perPage?: number; page?: number; }"
+    },
+    {
+      "name": "IBalanceQuery",
+      "kind": "type",
+      "signature": "export type IBalanceQuery = { account?: string | string[]; start_date?: Date | string | number; end_date?: Date | string | number; start_tx_id?: Types.ObjectId; end_tx_id?: Types.ObjectId; } & { [key: string]: string[] | number | string | Date | boolean | Types.ObjectId | IAnyObject; };"
+    },
+    {
+      "name": "IJournal",
+      "kind": "interface",
+      "signature": "export interface IJournal { _id: Types.ObjectId; datetime: Date; memo: string; _transactions: Types.ObjectId[]; book: string; voided?: boolean; void_reason?: string; }"
+    },
+    {
+      "name": "TJournalDocument",
+      "kind": "type",
+      "signature": "export type TJournalDocument<T extends IJournal = IJournal> = Omit<Document, \"__v\" | \"id\"> & T;"
+    },
+    {
+      "name": "setJournalSchema",
+      "kind": "function",
+      "signature": "export declare function setJournalSchema(schema: Schema, collection?: string): void;"
+    },
+    {
+      "name": "ReadPreferenceLike",
+      "kind": "type",
+      "signature": "export type ReadPreferenceLike = any;"
+    },
+    {
+      "name": "Hint",
+      "kind": "type",
+      "signature": "export type Hint = any;"
+    },
+    {
+      "name": "ReadConcernLike",
+      "kind": "type",
+      "signature": "export type ReadConcernLike = any;"
+    },
+    {
+      "name": "IOptions",
+      "kind": "type",
+      "signature": "export type IOptions = { session?: ClientSession; readPreference?: ReadPreferenceLike; hint?: Hint; readConcern?: ReadConcernLike; };"
+    },
+    {
+      "name": "Entry",
+      "kind": "class",
+      "signature": "export declare class Entry<U extends ITransaction = ITransaction, J extends IJournal = IJournal> { book: Book; journal: TJournalDocument<J> & { _original_journal?: Types.ObjectId; }; transactions: U[]; timestamp: Date; static write<U extends ITransaction, J extends IJournal>(book: Book, memo: string, date: Date | null, original_journal?: string | Types.ObjectId): Entry<U, J>; constructor(book: Book, memo: string, date: Date | null, original_journal?: string | Types.ObjectId); private transact; credit<T extends IAnyObject = IAnyObject>(account_path: string | string[], amount: number | string, extra?: (T & Partial<U>) | null): Entry<U, J>; debit<T extends IAnyObject = IAnyObject>(account_path: string | string[], amount: number | string, extra?: (T & Partial<U>) | null): Entry<U, J>; commit(options?: IOptions & { writelockAccounts?: string[] | RegExp; }): Promise<Entry<U, J>[\"journal\"]>; }"
+    },
+    {
+      "name": "Book",
+      "kind": "class",
+      "signature": "export declare class Book<U extends ITransaction = ITransaction, J extends IJournal = IJournal> { name: string; precision: number; maxAccountPath: number; balanceSnapshotSec: number; expireBalanceSnapshotSec: number; constructor(name: string, options?: { precision?: number; maxAccountPath?: number; balanceSnapshotSec?: number; expireBalanceSnapshotSec?: number; }); entry(memo: string, date?: Date | null, original_journal?: string | Types.ObjectId): Entry<U, J>; balance(query: IBalanceQuery, options?: IOptions): Promise<{ balance: number; notes: number; }>; ledger<T = U>(query: IFilterQuery & IPaginationQuery, options?: IOptions): Promise<{ results: T[]; total: number; }>; void(journal_id: string | Types.ObjectId, reason?: undefined | string, options?: IOptions, use_original_date?: boolean): Promise<Omit<Document, \"id\" | \"__v\"> & J & { _original_journal?: Types.ObjectId; }>; writelockAccounts(accounts: string[], options: Required<Pick<IOptions, \"session\">>): Promise<Book<U, J>>; listAccounts(options?: IOptions): Promise<string[]>; }"
+    },
+    {
+      "name": "setLockSchema",
+      "kind": "function",
+      "signature": "export declare function setLockSchema(schema: Schema, collection?: string): void;"
+    },
+    {
+      "name": "mongoTransaction",
+      "kind": "function",
+      "signature": "export declare function mongoTransaction<T = unknown>(fn: (session: ClientSession) => Promise<T>, options?: IAnyObject): Promise<void>;"
+    },
+    {
+      "name": "initModels",
+      "kind": "function",
+      "signature": "export declare function initModels(): Promise<void>;"
+    },
+    {
+      "name": "syncIndexes",
+      "kind": "function",
+      "signature": "export declare function syncIndexes(options?: { background: boolean; }): Promise<void>;"
+    },
+    {
+      "name": "MediciError",
+      "kind": "class",
+      "signature": "export declare class MediciError extends Error { code: number; constructor(message: string, code?: number); }"
+    },
+    {
+      "name": "BookConstructorError",
+      "kind": "class",
+      "signature": "export declare class BookConstructorError extends MediciError { code: number; constructor(message: string, code?: number); }"
+    },
+    {
+      "name": "InvalidAccountPathLengthError",
+      "kind": "class",
+      "signature": "export declare class InvalidAccountPathLengthError extends MediciError { code: number; constructor(message: string, code?: number); }"
+    },
+    {
+      "name": "JournalAlreadyVoidedError",
+      "kind": "class",
+      "signature": "export declare class JournalAlreadyVoidedError extends MediciError { code: number; constructor(message?: string, code?: number); }"
+    },
+    {
+      "name": "JournalNotFoundError",
+      "kind": "class",
+      "signature": "export declare class JournalNotFoundError extends MediciError { code: number; constructor(message?: string, code?: number); }"
+    },
+    {
+      "name": "TransactionError",
+      "kind": "class",
+      "signature": "export declare class TransactionError extends MediciError { code: number; total: number; constructor(message: string, total: number, code?: number); }"
+    },
+    {
+      "name": "UnsupportedMongoOperationError",
+      "kind": "class",
+      "signature": "export declare class UnsupportedMongoOperationError extends MediciError { constructor(operation: string); }"
+    },
+    {
+      "name": "connection",
+      "kind": "const",
+      "signature": "connection: MediciConnection"
+    },
+    {
+      "name": "SessionClosedError",
+      "kind": "class",
+      "signature": "export declare class SessionClosedError extends MediciError { constructor(message?: string); }"
+    },
+    {
+      "name": "TransactionIdReuseError",
+      "kind": "class",
+      "signature": "export declare class TransactionIdReuseError extends MediciError { cause: unknown; constructor(message: string, originalError: unknown); }"
+    },
+    {
+      "name": "default",
+      "kind": "default",
+      "signature": "re-export of Book",
+      "source": "Book"
+    }
+  ]
+}
