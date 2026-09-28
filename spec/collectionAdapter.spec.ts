@@ -178,9 +178,14 @@ describe("sqlCollection (ITD-93)", function () {
     }
   });
 
-  it("find with ledger-shaped sort over rows sharing datetime and timestamp returns insertion order (QA M7, balance.spec.ts:201-204)", async () => {
+  it("find with ledger-shaped sort over one entry's rows sharing datetime and timestamp returns insertion order (QA M7, balance.spec.ts:201-204)", async () => {
+    // One _journal: the real balance.spec.ts:201-204 case is six transactions
+    // in ONE entry (shared journal.datetime AND entry.timestamp). Within one
+    // entry the tiebreak is _id ASC (insertion order). The cross-entry
+    // same-millisecond tie is pinned by the next test.
+    const journal = newId();
     const ids = [0, 1, 2, 3, 4, 5].map((i) => `${A_ID_PREFIX}${i}`);
-    const docs = ids.map((id, i) => txDoc({ _id: id, book: LEDGER_BOOK, memo: `row ${i}`, _journal: newId() }));
+    const docs = ids.map((id, i) => txDoc({ _id: id, book: LEDGER_BOOK, memo: `row ${i}`, _journal: journal }));
     await txCol().insertMany(docs, {});
     const rows = await txCol()
       .find({ book: LEDGER_BOOK }, { sort: { datetime: -1, timestamp: -1 } })
@@ -199,6 +204,33 @@ describe("sqlCollection (ITD-93)", function () {
     expect(rows.length).to.equal(2);
     expect(rows[0]._id.toHexString()).to.equal(`${A_ID_PREFIX}1`);
     expect(rows[1]._id.toHexString()).to.equal(`${A_ID_PREFIX}2`);
+  });
+
+  it("find with ledger-shaped sort over DISTINCT entries sharing datetime and timestamp orders by commit order (book.spec.ts pagination)", async () => {
+    // Two entries constructed in the same millisecond: their rows tie on BOTH
+    // sort keys. A descending sort must present the LATER-committed entry
+    // first; _journal is time-ordered (ObjectId), so the tiebreak is
+    // _journal DESC (book.spec.ts:794-815 — vendored, unmodifiable). Under a
+    // plain _id ASC tiebreak the earlier entry's rows would win and that
+    // vendored test flakes whenever two commits land in one millisecond.
+    const jEarly = "0000000000000000000000c1";
+    const jLate = "0000000000000000000000c2";
+    const rEarly = "0000000000000000000000d1";
+    const rLate = "0000000000000000000000d2";
+    await txCol().insertMany(
+      [
+        txDoc({ _id: rEarly, book: "ledger-tie-book", memo: "early", _journal: jEarly }),
+        txDoc({ _id: rLate, book: "ledger-tie-book", memo: "late", _journal: jLate }),
+      ],
+      {}
+    );
+    const rows = await txCol()
+      .find({ book: "ledger-tie-book" }, { sort: { datetime: -1, timestamp: -1 } })
+      .toArray();
+    expect(rows.length).to.equal(2);
+    expect(rows[0]._id.toHexString()).to.equal(rLate);
+    expect(rows[0]._journal.toHexString()).to.equal(jLate);
+    expect(rows[1]._id.toHexString()).to.equal(rEarly);
   });
 
   it("findOne with {sort: {_id: -1}} returns the newest snapshot (getBestBalanceSnapshot shape)", async () => {

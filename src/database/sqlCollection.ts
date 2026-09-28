@@ -45,14 +45,16 @@
  * ITD-90 item 1). NULL columns are OMITTED from the returned document, not
  * returned as `null` (Mongo omits unset fields).
  *
- * Ordering (QA M7): every find/findOne terminates its ORDER BY with an `_id`
- * ASC tiebreak. Six transactions in one entry share journal.datetime AND
- * entry.timestamp (Entry.ts:87 stamps one timestamp on every row), so
- * `ORDER BY datetime DESC, timestamp DESC` is a total tie — and
- * balance.spec.ts:201-204 pins `results[2]` to the THIRD inserted row.
- * SQLite guarantees nothing for a full tie; book.spec.ts:395-397 reads
- * `snapshots[0]` as the older snapshot, so the no-sort default is `_id` ASC
- * (insertion order) as well.
+ * Ordering (QA M7 + ITD-96 flake fix): every find/findOne terminates its
+ * ORDER BY with `"_journal" DESC` (medici_transactions only) then `"_id" ASC`.
+ * See orderByFor for the full rationale: within one entry (shared datetime
+ * AND timestamp — Entry.ts stamps one timestamp on every row) the tie falls
+ * to `_id` ASC insertion order, which balance.spec.ts:201-204 pins; ACROSS
+ * entries constructed in the same millisecond (same datetime AND timestamp)
+ * journal-desc restores true commit order, which book.spec.ts pagination
+ * requires. SQLite guarantees nothing for a full tie; book.spec.ts:395-397
+ * reads `snapshots[0]` as the older snapshot, so the no-sort default is `_id`
+ * ASC (insertion order) as well.
  */
 import { ObjectId } from "bson";
 import { IAnyObject } from "../IAnyObject";
@@ -403,7 +405,23 @@ class SqlCollectionImpl implements SqlCollection {
     return value;
   }
 
-  /** ORDER BY parts; always terminated by the `_id` ASC tiebreak (QA M7). */
+  /**
+   * ORDER BY parts; always terminated by tiebreaks (QA M7 + ITD-96 flake fix).
+   *
+   * Terminators, in order:
+   * 1. `medici_transactions` only: `"_journal" DESC`. Consecutive entries can
+   *    be constructed within the same millisecond, so their rows tie on BOTH
+   *    `datetime` and `timestamp` (Entry.ts stamps `new Date()` per entry at
+   *    construction). A descending sort must present the LATER entry first;
+   *    `_journal` is time-ordered (ObjectId), so journal-desc is the true
+   *    commit-order resolution. (book.spec.ts pagination: same-ms entries.)
+   * 2. `"_id" ASC`. Six transactions in one entry share journal.datetime AND
+   *    entry.timestamp (Entry.ts stamps one timestamp on every row), so within
+   *    a single entry the tie falls through to insertion order — and
+   *    balance.spec.ts:201-204 pins `results[2]` to the THIRD inserted row.
+   * book.spec.ts:395-397 reads `snapshots[0]` (medici_balances) as the older
+   * snapshot, so that table's no-sort default stays plain `_id` ASC.
+   */
   private orderByFor(sort: unknown): string[] {
     const allCols = new Set(FULL_COLUMNS[this.table]);
     const parts: string[] = [];
@@ -435,6 +453,9 @@ class SqlCollectionImpl implements SqlCollection {
       }
     }
     if (!parts.some((p) => p.startsWith(`"_id"`))) {
+      if (this.name === "medici_transactions") {
+        parts.push(`"_journal" DESC`);
+      }
       parts.push(`"_id" ASC`);
     }
     return parts;

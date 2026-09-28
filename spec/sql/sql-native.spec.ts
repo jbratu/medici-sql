@@ -18,13 +18,16 @@ import { execFile, execFileSync } from "child_process";
 import { expect } from "chai";
 import * as os from "os";
 import * as path from "path";
-import { Book, connection } from "../src";
-import { ConsistencyError } from "../src/errors";
-import { transactionModel } from "../src/models/transaction";
-import { balanceModel } from "../src/models/balance";
-import { Types } from "../src/compat/mongoose";
-import { connectPrisma, databaseUrl, disconnectPrisma, isInMemoryUrl } from "../src/database/client";
-import { createSchema } from "../src/database/schema";
+import { Book, connection, syncIndexes, JournalAlreadyVoidedError } from "../../src";
+import { connection as compatConnection } from "../../src/compat/mongoose";
+import { setTransactionSchema, transactionSchema, transactionModel } from "../../src/models/transaction";
+import { ConsistencyError } from "../../src/errors/ConsistencyError";
+import { getTransactionSchemaTest } from "../helper/transactionSchema";
+import type { ITransactionTest } from "../helper/transactionSchema";
+import { balanceModel } from "../../src/models/balance";
+import { Types } from "../../src/compat/mongoose";
+import { connectPrisma, databaseUrl, disconnectPrisma, isInMemoryUrl } from "../../src/database/client";
+import { createSchema } from "../../src/database/schema";
 
 const REPO_ROOT = path.join(__dirname, "..", "..");
 const G2_FIXTURE = path.join(__dirname, "..", "fixtures", "g2-snapshot-child.js");
@@ -60,7 +63,7 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
       await disconnectPrisma();
     }
     await connectPrisma();
-    const { getPrismaClient } = require("../src/database/client") as typeof import("../src/database/client");
+    const { getPrismaClient } = require("../../src/database/client") as typeof import("../../src/database/client");
     const prisma = getPrismaClient();
     const rows = await prisma.$queryRawUnsafe(
       "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'medici_id_sequence'"
@@ -70,7 +73,7 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
     }
   });
 
-  it("G1: concurrent double-void — one ConsistencyError, exactly one reversal journal", async () => {
+  it("G1: concurrent double-void — exactly one wins, loser rejected by a double-void guard, one reversal journal", async () => {
     const book = new Book(`g1-${suffix()}`);
     const journal = await book.entry("g1").debit("Assets:Cash", 5).credit("Income", 5).commit();
 
@@ -83,13 +86,43 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
     const rejected = results.filter((r) => r.status === "rejected");
     expect(resolved).to.have.length(1);
     expect(rejected).to.have.length(1);
-    const err = (rejected[0] as PromiseRejectedResult).reason as Error;
-    expect(err).to.be.instanceOf(ConsistencyError);
-    expect(err.message).to.include("Already voided");
+    // The loser trips one of upstream's two double-void guards, depending on
+    // whether its out-of-session journal read (Book.ts:~246) lands before or
+    // after the winner's commit:
+    //  - read guard: voided already true -> JournalAlreadyVoidedError (code 400)
+    //  - modifiedCount guard (Book.ts:312): updateOne matched the journal but
+    //    changed nothing -> ConsistencyError "Already voided ...".
+    // Both abort before any reversal is written. Which guard fires is a
+    // timing outcome of the race, not part of the client contract; the
+    // contract is: exactly one winner, one rejection, one reversal journal.
+    const err = (rejected[0] as PromiseRejectedResult).reason;
+    const readGuard =
+      err instanceof JournalAlreadyVoidedError &&
+      err.message === "Journal already voided." &&
+      (err as { code?: number }).code === 400;
+    const modifiedGuard =
+      err instanceof ConsistencyError && /^Already voided .* journal on book /.test((err as Error).message);
+    expect(
+      readGuard || modifiedGuard,
+      `unexpected loser error: ${err?.constructor?.name}: ${err?.message}`
+    ).to.equal(true);
 
-    // The winner's reversal is the only reversal journal in the book.
+    // The winner's reversal is the only reversal journal in the book:
+    // one reversal entry with both original transactions reversed (2 rows),
+    // all belonging to a single reversal journal.
     const reversals = await book.ledger({ _original_journal: journal._id });
-    expect(reversals.results).to.have.length(1);
+    expect(reversals.results).to.have.length(2);
+    // _journal comes back as ObjectId instances (upstream contract) —
+    // stringify before set membership.
+    const reversalJournalIds = new Set(
+      reversals.results.map((t) => String((t as Record<string, unknown>)._journal))
+    );
+    expect(reversalJournalIds).to.have.length(1);
+    for (const t of reversals.results as Array<Record<string, unknown>>) {
+      expect(t.memo).to.equal("[VOID] g1");
+      expect("voided" in t).to.equal(false);
+      expect("void_reason" in t).to.equal(false);
+    }
 
     const original = await book.ledger({ _journal: journal._id });
     expect(original.results).to.have.length(2);
@@ -185,7 +218,7 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
       .credit("A:B", 1, { n: 1 })
       .credit("A:B", 2, { n: 2 })
       .credit("A:B", 3, { n: 3 })
-      .debit("A:B", 6)
+      .debit("Z:W", 6)
       .commit();
 
     const { results } = await book.ledger({ account: "A:B" });
@@ -194,7 +227,10 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
   });
 
   it("G5: balance({start_tx_id, end_tx_id}) bounds the aggregate", async () => {
-    const book = new Book(`g5-${suffix()}`);
+    // balanceSnapshotSec: 0 — Book.ts:104 overwrites parsedQuery._id with the
+    // snapshot cursor once a snapshot exists, so a snapshot on this account
+    // would shadow the very range path under test.
+    const book = new Book(`g5-${suffix()}`, { balanceSnapshotSec: 0 });
     await book.entry("g5-1").credit("A:B", 10).debit("C:D", 10).commit();
     await book.entry("g5-2").credit("A:B", 5).debit("C:D", 5).commit();
 
@@ -347,5 +383,75 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
     // Second call reuses the snapshot and still counts both rows.
     const b2 = await book.balance({ account: "Assets:Receivable" });
     expect(b2).to.deep.equal({ balance: 2, notes: 2 });
+  });
+
+  // SQL-native replacement for the Tier C vendored test
+  // spec/setTransactionSchema.spec.ts :: "should return full ledger with
+  // _journal2" (TEST_COMPAT_MATRIX.md). Reproduces everything except the
+  // Mongoose `diffIndexes` assertions (a Mongo physical-index internal the
+  // port makes a no-op by design, plan r2): (a) deleteModel + re-register
+  // preserves the model name, (b) the custom `_journal2` ObjectId field
+  // round-trips through `ledger`, (c) `_journal2._id` is a real ObjectId
+  // equal to the journal id.
+  it("SQL-native setTransactionSchema replacement: custom _journal2 ObjectId round-trips through ledger", async function () {
+    this.timeout(15000);
+    await syncIndexes({ background: false });
+
+    try {
+      setTransactionSchema(getTransactionSchemaTest(), undefined, { defaultIndexes: false });
+
+      // (a) deleteModel + re-register preserves the model name: the
+      // validation error prefix stays "Medici_Transaction". (The model
+      // registry lives on the compat "mongoose" connection, not the port's
+      // ../src connection export.)
+      compatConnection.deleteModel("Medici_Transaction");
+      setTransactionSchema(getTransactionSchemaTest(), undefined, { defaultIndexes: false });
+      expect(compatConnection.models["Medici_Transaction"]).to.exist;
+      const doc: any = new (transactionModel as any)({
+        credit: 1,
+        debit: 2,
+        datetime: "still invalid",
+        account_path: ["A"],
+        accounts: "A",
+        book: "B",
+        memo: "m",
+        _journal: new Types.ObjectId(),
+        timestamp: new Date(),
+      });
+      try {
+        await doc.validate();
+        expect.fail("validate() should have rejected");
+      } catch (err) {
+        expect((err as Error).message).to.match(/^Medici_Transaction validation failed: datetime: /);
+      }
+
+      // (b)+(c) the custom `_journal2` ObjectId field, written in meta like
+      // any client extra, comes back through `ledger` hydrated as an
+      // ObjectId whose `_id` is itself (QA M4).
+      const book = new Book<ITransactionTest>("MyBook-TransactionSchemaSQL");
+      const journal = await book
+        .entry("Test")
+        .credit("Assets:Receivable", 1)
+        .credit("Assets:Receivable", 2)
+        .debit("Income:Rent", 1)
+        .debit("Income:Rent", 2)
+        .commit();
+
+      await book
+        .entry("Test fp")
+        .credit("Cars", 1, { _journal2: journal._id })
+        .debit("Cars", 1, { _journal2: journal._id })
+        .commit();
+
+      const res = await book.ledger({ account: "Cars" });
+      expect(res.results).to.have.lengthOf(2);
+      expect(res.results[0]._journal2._id).to.be.instanceof(Types.ObjectId);
+      expect(res.results[1]._journal2._id).to.be.instanceof(Types.ObjectId);
+      expect(res.results[0]._journal2._id.toString()).to.equal(journal._id.toString());
+      expect(res.results[1]._journal2._id.toString()).to.equal(journal._id.toString());
+    } finally {
+      setTransactionSchema(transactionSchema);
+      await syncIndexes({ background: false });
+    }
   });
 });

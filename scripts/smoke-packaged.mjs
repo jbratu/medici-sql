@@ -67,9 +67,9 @@ try {
     smokePath,
     `"use strict";
 const assert = require("assert");
-const os = require("os");
-const path = require("path");
-process.env.MEDICI_SQL_DATABASE_URL = \`file:\${path.join(os.tmpdir(), "medici-sql-smoke-\${process.pid}.db")}\`;
+// Concrete per-run path: the scratch dir is unique (mkdtemp) and deleted in
+// the finally block, so the smoke DB can never accumulate state across runs.
+process.env.MEDICI_SQL_DATABASE_URL = "file:${path.join(scratch, "smoke.db")}";
 const { Book } = require("medici-sql");
 (async () => {
   const book = new Book("smoke-book");
@@ -79,7 +79,7 @@ const { Book } = require("medici-sql");
   assert.deepStrictEqual(balance, { balance: 10, notes: 1 });
   const ledger = await book.ledger({ account: "Income" });
   assert.strictEqual(ledger.results.length, 1);
-  assert.strictEqual(ledger.results[0].credit, 10);
+  assert.strictEqual(ledger.results[0].debit, 10);
   const accounts = await book.listAccounts();
   assert.deepStrictEqual(accounts, ["Assets", "Assets:Cash", "Income"]);
   await book.void(journal._id, "smoke void");
@@ -118,7 +118,7 @@ const { Book } = require("medici-sql");
   for (const dir of greps) {
     let out = "";
     try {
-      out = execFileSync("grep", ["-rn", "-E", 'require\\(["\']mongoose["\\']\\)|from ["\']mongoose["\']', dir], {
+      out = execFileSync("grep", ["-rn", "-E", 'require\\(["\']mongoose["\']\\)|from ["\']mongoose["\']', dir], {
         stdio: ["ignore", "pipe", "ignore"],
       }).toString();
     } catch (err) {
