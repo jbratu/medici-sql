@@ -33,6 +33,8 @@ const REPO_ROOT = path.join(__dirname, "..", "..");
 const G2_FIXTURE = path.join(__dirname, "..", "fixtures", "g2-snapshot-child.js");
 // The same per-process file test/mocha-setup.ts computes (pid-scoped).
 const SHARED_DB_FILE = path.join(os.tmpdir(), `medici-sql-${process.pid}.db`);
+const RECEIVABLE_ACCOUNT = "Assets:Receivable";
+const RENT_ACCOUNT = "Income:Rent";
 
 const suffix = () => `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 
@@ -63,6 +65,8 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
       await disconnectPrisma();
     }
     await connectPrisma();
+    // require must stay lazy: a top-level import would bind client.ts before MEDICI_SQL_DATABASE_URL is rewritten above, falling back to the in-memory URL the G2 two-process test must not see.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { getPrismaClient } = require("../../src/database/client") as typeof import("../../src/database/client");
     const prisma = getPrismaClient();
     const rows = await prisma.$queryRawUnsafe(
@@ -102,10 +106,9 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
       (err as { code?: number }).code === 400;
     const modifiedGuard =
       err instanceof ConsistencyError && /^Already voided .* journal on book /.test((err as Error).message);
-    expect(
-      readGuard || modifiedGuard,
-      `unexpected loser error: ${err?.constructor?.name}: ${err?.message}`
-    ).to.equal(true);
+    expect(readGuard || modifiedGuard, `unexpected loser error: ${err?.constructor?.name}: ${err?.message}`).to.equal(
+      true
+    );
 
     // The winner's reversal is the only reversal journal in the book:
     // one reversal entry with both original transactions reversed (2 rows),
@@ -114,9 +117,7 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
     expect(reversals.results).to.have.length(2);
     // _journal comes back as ObjectId instances (upstream contract) —
     // stringify before set membership.
-    const reversalJournalIds = new Set(
-      reversals.results.map((t) => String((t as Record<string, unknown>)._journal))
-    );
+    const reversalJournalIds = new Set(reversals.results.map((t) => String((t as Record<string, unknown>)._journal)));
     expect(reversalJournalIds).to.have.length(1);
     for (const t of reversals.results as Array<Record<string, unknown>>) {
       expect(t.memo).to.equal("[VOID] g1");
@@ -235,18 +236,24 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
     await book.entry("g5-2").credit("A:B", 5).debit("C:D", 5).commit();
 
     const all = await book.ledger({});
-    const ids = (all.results as Array<{ _id: Types.ObjectId }>)
-      .map((t) => t._id.toString())
-      .sort();
+    const ids = (all.results as Array<{ _id: Types.ObjectId }>).map((t) => t._id.toString()).sort();
     expect(ids).to.have.length(4);
     // ids: [c1, d1, c2, d2] — c1/c2 the A:B credits, d1/d2 the C:D debits.
     const d1 = ids[1];
     const c2 = ids[2];
 
-    const r1 = await book.balance({ account: "A:B", start_tx_id: new Types.ObjectId(d1), end_tx_id: new Types.ObjectId(c2) });
+    const r1 = await book.balance({
+      account: "A:B",
+      start_tx_id: new Types.ObjectId(d1),
+      end_tx_id: new Types.ObjectId(c2),
+    });
     expect(r1).to.deep.equal({ balance: 5, notes: 1 });
 
-    const r2 = await book.balance({ account: "A:B", start_tx_id: new Types.ObjectId(d1), end_tx_id: new Types.ObjectId(d1) });
+    const r2 = await book.balance({
+      account: "A:B",
+      start_tx_id: new Types.ObjectId(d1),
+      end_tx_id: new Types.ObjectId(d1),
+    });
     expect(r2).to.deep.equal({ balance: 0, notes: 0 });
   });
 
@@ -317,7 +324,9 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
     // Insertion order (meta.n) must equal _id order for the whole bulk.
     expect(byId.map((t) => t.meta.n)).to.deep.equal([1, 2, 3, 4, 5, 6]);
     for (let i = 1; i < byId.length; i++) {
-      expect(byId[i - 1]._id.toString() < byId[i]._id.toString(), "bulk ids must be strictly increasing").to.equal(true);
+      expect(byId[i - 1]._id.toString() < byId[i]._id.toString(), "bulk ids must be strictly increasing").to.equal(
+        true
+      );
     }
     expect((await book.balance({ account: "A:B" })).balance).to.equal(0);
 
@@ -346,9 +355,9 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
 
   it("SQL-native 'ignore order of doc insertion': hand-picked LOWER ObjectId, balance still correct", async () => {
     const book = new Book(`gb-${suffix()}`);
-    const journal = await book.entry("low").credit("Assets:Receivable", 1).debit("Income:Rent", 1).commit();
+    const journal = await book.entry("low").credit(RECEIVABLE_ACCOUNT, 1).debit(RENT_ACCOUNT, 1).commit();
 
-    const { results } = await book.ledger({ account: "Assets:Receivable" });
+    const { results } = await book.ledger({ account: RECEIVABLE_ACCOUNT });
     const existing = (results[0] as Record<string, any>)._id.toString();
     const low = "000000000000000000000042";
     expect(low < existing).to.equal(true);
@@ -358,7 +367,7 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
       _id: low,
       book: book.name,
       account_path: ["Assets", "Receivable"],
-      accounts: "Assets:Receivable",
+      accounts: RECEIVABLE_ACCOUNT,
       memo: "low id row",
       credit: 1,
       debit: 0,
@@ -369,19 +378,19 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
 
     // Full-aggregate path (snapshots removed, like the vendored Tier B test).
     await balanceModel.collection.deleteMany({ book: book.name });
-    const b1 = await book.balance({ account: "Assets:Receivable" });
+    const b1 = await book.balance({ account: RECEIVABLE_ACCOUNT });
     expect(b1).to.deep.equal({ balance: 2, notes: 2 });
 
     // The fresh snapshot pins lastTransactionId to the MAX id (the normal
     // row, not the hand-picked lower one).
-    const rows = (await balanceModel.find({ book: book.name, account: "Assets:Receivable" })) as Array<
+    const rows = (await balanceModel.find({ book: book.name, account: RECEIVABLE_ACCOUNT })) as Array<
       Record<string, unknown> & { transaction: Types.ObjectId }
     >;
     expect(rows).to.have.length(1);
     expect(rows[0].transaction.toString()).to.equal(existing);
 
     // Second call reuses the snapshot and still counts both rows.
-    const b2 = await book.balance({ account: "Assets:Receivable" });
+    const b2 = await book.balance({ account: RECEIVABLE_ACCOUNT });
     expect(b2).to.deep.equal({ balance: 2, notes: 2 });
   });
 
@@ -431,10 +440,10 @@ describe("spec/sql SQL-native (ITD-96 QA amendments)", function () {
       const book = new Book<ITransactionTest>("MyBook-TransactionSchemaSQL");
       const journal = await book
         .entry("Test")
-        .credit("Assets:Receivable", 1)
-        .credit("Assets:Receivable", 2)
-        .debit("Income:Rent", 1)
-        .debit("Income:Rent", 2)
+        .credit(RECEIVABLE_ACCOUNT, 1)
+        .credit(RECEIVABLE_ACCOUNT, 2)
+        .debit(RENT_ACCOUNT, 1)
+        .debit(RENT_ACCOUNT, 2)
         .commit();
 
       await book

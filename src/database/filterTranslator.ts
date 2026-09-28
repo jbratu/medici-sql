@@ -304,12 +304,7 @@ function translateValue(expr: string, key: string, value: unknown, kind: ColumnK
     if (kind === "objectId") return objectClause(expr, key, value, params);
     throw new UnsupportedMongoOperationError(`object value is not supported for field "${key}"`);
   }
-  if (
-    kind === "objectId" &&
-    value !== null &&
-    typeof value === "object" &&
-    !(value instanceof Date)
-  ) {
+  if (kind === "objectId" && value !== null && typeof value === "object" && !(value instanceof Date)) {
     // Class instances (a hydrated Document, or an ObjectId subclass) are
     // not "plain" objects but still cast to their hex id here.
     return objectClause(expr, key, value as IAnyObject, params);

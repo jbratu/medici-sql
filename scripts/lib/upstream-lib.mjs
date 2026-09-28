@@ -392,11 +392,11 @@ export function validateMatrix(matrix, findings) {
         findings.push(finding('matrix', 'fail', r.file, `Tier C row for ${what}: replacement must be "spec/sql/<file>.ts :: <title>" or "none"`));
         continue;
       }
-      const target = path.join(ROOT, m[1]);
+      const target = path.join(ROOT, 'spec', 'sql', m[1]);
       if (!existsSync(target)) {
-        findings.push(finding('matrix', 'fail', r.file, `Tier C row for ${what}: replacement target ${m[1]} does not exist in the repo`));
+        findings.push(finding('matrix', 'fail', r.file, `Tier C row for ${what}: replacement target spec/sql/${m[1]} does not exist in the repo`));
       } else if (!readFileSync(target, 'utf8').includes(m[2])) {
-        findings.push(finding('matrix', 'fail', r.file, `Tier C row for ${what}: title "${m[2]}" not found in ${m[1]}`));
+        findings.push(finding('matrix', 'fail', r.file, `Tier C row for ${what}: title "${m[2]}" not found in spec/sql/${m[1]}`));
       }
     } else if (!repl || repl === 'none' || repl === '—' || repl === '-') {
       if (!r.clientImpact) {

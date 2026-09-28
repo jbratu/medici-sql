@@ -49,6 +49,7 @@ const CONCURRENT_ACCOUNT = "C:Concurrent";
 const DELETE_BOOK = "delete-book";
 const XCONN_BOOK = "xconn-book";
 const LEDGER_BOOK = "ledger-book";
+const LEDGER_TIE_BOOK = "ledger-tie-book";
 const DISTINCT_BOOK = "distinct-book";
 
 function txDoc(overrides: IAnyObject = {}): IAnyObject {
@@ -219,13 +220,13 @@ describe("sqlCollection (ITD-93)", function () {
     const rLate = "0000000000000000000000d2";
     await txCol().insertMany(
       [
-        txDoc({ _id: rEarly, book: "ledger-tie-book", memo: "early", _journal: jEarly }),
-        txDoc({ _id: rLate, book: "ledger-tie-book", memo: "late", _journal: jLate }),
+        txDoc({ _id: rEarly, book: LEDGER_TIE_BOOK, memo: "early", _journal: jEarly }),
+        txDoc({ _id: rLate, book: LEDGER_TIE_BOOK, memo: "late", _journal: jLate }),
       ],
       {}
     );
     const rows = await txCol()
-      .find({ book: "ledger-tie-book" }, { sort: { datetime: -1, timestamp: -1 } })
+      .find({ book: LEDGER_TIE_BOOK }, { sort: { datetime: -1, timestamp: -1 } })
       .toArray();
     expect(rows.length).to.equal(2);
     expect(rows[0]._id.toHexString()).to.equal(rLate);
