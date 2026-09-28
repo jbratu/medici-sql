@@ -1,26 +1,107 @@
 # Supported Mongo Operations — SQLite backend
 
+The compatibility layer's contract: exactly which Mongo-shaped operations the
+SQLite backend implements, and what happens with everything else. The layer
+sits under the verbatim upstream business logic (`src/Book.ts`,
+`src/Entry.ts`, `src/helper/parse/*`) and only has to understand the
+operations **Medici itself emits** — nothing more. Anything outside this
+surface throws `UnsupportedMongoOperationError` (extends `MediciError`,
+`src/errors/UnsupportedMongoOperationError.ts`). We are not reimplementing
+MongoDB; this is a deliberate cap, not an oversight.
+
+`SqlCollection` (the object returned by `connection.collection(name)` /
+`connection.db.collection(name)`) is the interface the models program
+against: `src/database/sqlCollection.ts:101-112`.
+
+## Collection methods
+
+| Method | Supported option keys | Returns |
+| --- | --- | --- |
+| `insertOne(doc, options?)` | `session`, `writeConcern` (ignored), `forceServerObjectId` (ignored); any other key ignored | `{ acknowledged: true, insertedId }` |
+| `insertMany(docs, options?)` | `session`, `ordered` (ignored — the batch is all-or-nothing inside its transaction either way), `forceServerObjectId` (ignored); any other key ignored | `{ acknowledged: true, insertedIds: Record<string, ObjectId>, insertedCount }` |
+| `find(filter?, options?)` | `sort`, `skip`, `limit`, `projection` (inclusion of the known fields), `session`, `readPreference`/`readConcern` (ignored) | cursor: `{ toArray() }` |
+| `findOne(filter?, options?)` | `sort`, `projection`, `session`, `readPreference`/`readConcern` (ignored) | doc or `null` |
+| `countDocuments(filter?, options?)` | `session`, `readPreference`/`readConcern` (ignored) | number |
+| `distinct(field, filter?, options?)` | `session`, `readPreference`/`readConcern` (ignored) | `unknown[]` |
+| `updateOne(filter, update, options?)` | update operators `$set`, `$setOnInsert`, `$inc`; options `upsert`, `session`, `writeConcern` (ignored) | `{ acknowledged, matchedCount, modifiedCount, upsertedId? }` |
+| `updateMany(filter, update, options?)` | update operator `$set` | same shape as `updateOne` |
+| `deleteMany(filter, options?)` | `session` | `{ acknowledged: true, deletedCount }` |
+| `aggregate(pipeline?, options?)` | see "The single supported aggregation pipeline" | cursor: `{ toArray() }` |
+
+Port-internal extras beyond the upstream call set: `deleteOne`, and `upsert`
+(a shorthand for `updateOne` with `{ upsert: true }`).
+
+- `matchedCount` and `modifiedCount` are genuinely distinct counts
+  (matched rows vs rows actually changed), as Mongo reports them.
+- `sort` values are direction numbers (`1`/`-1`), the same objects upstream
+  passes (e.g. `ledger()` sorts `{ datetime: -1, timestamp: -1 }`,
+  `src/Book.ts`).
+- `session` is the port's `ClientSession` (`src/database/session.ts`). Every
+  method that receives one routes through the transaction's Prisma client,
+  which is also what makes read-your-own-writes inside a transaction work
+  (`spec/transaction.spec.ts` "reads its own uncommitted writes inside a
+  write transaction (xacid.spec.ts:249)").
+- Option keys upstream emits that are not in the "supported" column
+  (`readPreference`, `readConcern`, `hint`, `writeConcern`,
+  `forceServerObjectId`) are structurally accepted by
+  `SqlCollectionOptions` (`src/database/sqlCollection.ts:71`, `session` plus
+  an index signature) and ignored. `spec/collectionAdapter.spec.ts` pins the
+  method/option surface.
+
+## The single supported aggregation pipeline
+
+`aggregate()` accepts exactly one pipeline shape — the one
+`Book.balance()` emits (`src/Book.ts:20-26`, call sites at `src/Book.ts:119`
+and `src/Book.ts:166`):
+
+```js
+[
+  { $match: <filter> },
+  {
+    $group: {
+      _id: null,
+      balance: { $sum: { $subtract: ["$credit", "$debit"] } },
+      notes: { $sum: 1 },
+      lastTransactionId: { $max: "$_id" },
+    },
+  },
+]
+```
+
+- `$match` is translated by the same filter rules below (any field the
+  balance/ledger queries use).
+- The `$group` is the fixed accumulator above, verbatim. Empty match sets
+  map to "no row" (`{ _count: 0 }` → no result), matching the
+  `if (result)` semantics at `src/Book.ts:129` (`spike/FINDINGS.md`,
+  sequential-throughput note).
+- Anything else — other `$group` accumulators, other pipeline stages,
+  multiple `$match`es, `$project`, `$sort` stages — throws
+  `UnsupportedMongoOperationError`.
+
+## Filter operators
+
 Scope of the filter translator (`src/database/filterTranslator.ts`,
-[ITD-92](/ITD/issues/ITD-92)). Inputs are the Mongo-shaped filter objects
-Medici itself emits via `parseFilterQuery` / `parseBalanceQuery`; the
-translator converts them into parameterized SQLite `WHERE` fragments
-(`translateFilter(filter, { collection }) → { where, params }`) that ITD-93
-executes. **Anything outside this surface throws
-`UnsupportedMongoOperationError`** with a message naming the offending
-operator or path. We are not reimplementing MongoDB.
+ITD-92). Inputs are the Mongo-shaped filter objects Medici itself emits via
+`parseFilterQuery` / `parseBalanceQuery`; the translator converts them into
+parameterized SQLite `WHERE` fragments
+(`translateFilter(filter, { collection }) → { where, params }`) that
+ITD-93 executes.
 
-## Operators
-
-| Operator                     | Meaning                    | SQL mapping (`E` = target expression)             |
-| ---------------------------- | -------------------------- | ------------------------------------------------- |
-| `field: v`                   | equality                   | `E = ?` (see null bucket below)                   |
-| `$gt`, `$gte`, `$lt`, `$lte` | comparison                 | `E > ?` / `E >= ?` / `E < ?` / `E <= ?`           |
-| `$in`                        | membership                 | `E IN (?, ...)`; empty array → `0 = 1` (no match) |
-| `$ne`                        | inequality                 | `E IS NULL OR E <> ?`                             |
-| `$or`                        | top-level disjunction only | sub-filters `OR`-joined, parenthesized            |
+| Operator | Meaning | SQL mapping (`E` = target expression) |
+| --- | --- | --- |
+| `field: v` | equality | `E = ?` (see null bucket below) |
+| `$gt`, `$gte`, `$lt`, `$lte` | comparison | `E > ?` / `E >= ?` / `E < ?` / `E <= ?` |
+| `$in` | membership | `E IN (?, ...)`; empty array → `0 = 1` (no match) |
+| `$ne` | inequality | `E IS NULL OR E <> ?` |
+| `$or` | top-level disjunction only | sub-filters `OR`-joined, parenthesized |
 
 Multiple operators on one field are ANDed and grouped:
 `{_id: {$gt: a, $lte: b}}` → `(_id > ? AND _id <= ?)`.
+
+Dotted paths: `meta.<k>[.<k>…]` (JSON paths, all-digit segments become array
+indexes) and `account_path.<0|1|2>` (denormalized columns). `spec/filterTranslator.spec.ts`
+and `spec/filterTranslator.sqlite.spec.ts` pin the operator matrix end to
+end.
 
 ### Equality null bucket (Mongo semantics)
 
@@ -28,14 +109,14 @@ Mongo equality with `null` or `false` also matches documents where the field
 is missing. The translator reproduces this on both plain columns and `meta`
 JSON paths (a missing JSON key extracts to `NULL`):
 
-| Filter                        | SQL                          |
-| ----------------------------- | ---------------------------- |
-| `field: null`, `field: false` | `(E IS NULL OR E = 0)`       |
-| `field: true`                 | `E = 1`                      |
-| `$ne: null`                   | `E IS NOT NULL`              |
-| `$ne: false`                  | `(E IS NOT NULL AND E <> 0)` |
-| `$ne: true`                   | `(E IS NULL OR E <> 1)`      |
-| `$ne: <scalar>`               | `(E IS NULL OR E <> ?)`      |
+| Filter | SQL |
+| --- | --- |
+| `field: null`, `field: false` | `(E IS NULL OR E = 0)` |
+| `field: true` | `E = 1` |
+| `$ne: null` | `E IS NOT NULL` |
+| `$ne: false` | `(E IS NOT NULL AND E <> 0)` |
+| `$ne: true` | `(E IS NULL OR E <> 1)` |
+| `$ne: <scalar>` | `(E IS NULL OR E <> ?)` |
 
 `$gt`/`$gte`/`$lt`/`$lte` never match `NULL` (missing), matching Mongo.
 
@@ -63,7 +144,9 @@ Any other top-level key throws `unknown field "<key>" for collection
 24-char lowercase-hex strings. Lexicographic order == byte order == time
 order, so `>`/`>=`/`<`/`<=` on the TEXT column give the monotonic semantics
 `Book.balance` depends on (verified across a byte boundary, e.g. `…0ff`
-sorts before `…100`).
+sorts before `…100`; `spike/FINDINGS.md` "ObjectId storage validation";
+pinned by `spec/filterTranslator.sqlite.spec.ts` "_id range across a byte
+boundary (QA G5)").
 
 ### `account_path.N`
 
@@ -119,13 +202,20 @@ whitespace sensitive and silently returns zero rows.
 - **Booleans** → `1`/`0`; numbers and strings pass through for their
   column kind (kind mismatch throws).
 
-## Hard cap
+## Everything else
 
 The following throw `UnsupportedMongoOperationError` (naming the operator or
 path): `$regex`, `$exists`, `$elemMatch`, `$and`, `$nor`, `$expr`,
 aggregation operators, any unknown `$foo`, `$or` items that are not filter
 objects, array/object values on non-JSON columns, non-object `meta` values,
-and `meta` paths containing `[` or empty segments.
+`meta` paths containing `[` or empty segments, any `update` operator other
+than the listed ones, and any `aggregate` pipeline other than the one above.
+
+**This is a deliberate cap.** The layer exists to run Medici's own
+operations, not to be a general Mongo engine. If your application (not
+Medici) needs an operation that is not here, the request path is: a failing
+test against `SqlCollection` plus a real use case, filed on the port. We do
+not add operations on speculation.
 
 ## Documented limitations
 

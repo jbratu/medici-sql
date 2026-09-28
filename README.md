@@ -1,28 +1,35 @@
-# medici
+# medici-sql
 
-<div align="center">
+API-compatible **SQL (Prisma/SQLite) port** of [flash-oss/medici](https://github.com/flash-oss/medici), tracking upstream **`v7.3.0-1-g54fa40b`** (commit `54fa40b`). Same public API, same document shapes, same spec suite — only the data-access layer underneath is swapped for Prisma + SQLite.
 
-[![Build Status](https://github.com/flash-oss/medici/actions/workflows/ci.yml/badge.svg)](https://github.com/flash-oss/medici/actions)
-[![Known Vulnerabilities](https://snyk.io/test/github/flash-oss/medici/badge.svg)](https://snyk.io/test/github/flash-oss/medici)
-[![Security Responsible Disclosure](https://img.shields.io/badge/Security-Responsible%20Disclosure-yellow.svg)](https://github.com/nodejs/security-wg/blob/HEAD/processes/responsible_disclosure_template.md)
-[![NPM version](https://img.shields.io/npm/v/medici.svg?style=flat)](https://www.npmjs.com/package/medici)
-[![NPM downloads](https://img.shields.io/npm/dm/medici.svg?style=flat)](https://www.npmjs.com/package/medici)
+- [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) — what changes when you swap this in, and what deliberately does not.
+- [docs/SUPPORTED_OPERATIONS.md](docs/SUPPORTED_OPERATIONS.md) — the exact Mongo-shaped operations the backend implements; everything else throws `UnsupportedMongoOperationError`.
+- [TEST_COMPAT_MATRIX.md](TEST_COMPAT_MATRIX.md) — which upstream tests are client-facing and how they map here.
 
-</div>
-
-Double-entry accounting system for nodejs + mongoose
+Double-entry accounting system for nodejs + SQLite
 
 ```bash
-npm i medici
+npm i medici-sql
 ```
+
+## Setup
+
+medici-sql stores its data in a single **SQLite** file, accessed through Prisma. No MongoDB, no replica set, no Mongoose.
+
+- The default database file is `medici-sql.db` in the package root (resolved relative to the installed package, so it is the same path from source and from `build/` — `src/database/client.ts`).
+- Override it with the `MEDICI_SQL_DATABASE_URL` environment variable (e.g. `file:/var/lib/myapp/ledger.db`, or `file::memory:` for a throwaway in-memory database).
+- To point a running process at a specific database, call the optional `connection.connect("file:...")` (rebuilds the process-wide client; `connection.disconnect()` forgets it). **No init call is required** — the first database operation connects and bootstraps the schema lazily, so code written for upstream medici works unchanged.
+- Schema bootstrap is lazy and idempotent: missing `medici_*` tables are created on first use (`src/database/schema.ts`). A database containing only some of the tables is treated as corrupt and reset.
+- Development scripts: `npm run db:push` (apply `prisma/schema.prisma` to the database) and `npm run db:reset` (drop and recreate).
+- Pinned stack: Prisma `7.10.0` + `@prisma/adapter-better-sqlite3` `7.10.0` + `better-sqlite3` `13.0.3` (bundles **SQLite 3.53.4**) + `bson` `7.3.3` (`package.json`; rationale in `docs/PORTING-NOTES.md`).
 
 ## Basics
 
-To use Medici you will need a working knowledge of JavaScript, Node.js, and Mongoose.
+To use Medici you will need a working knowledge of JavaScript and Node.js.
 
 Medici divides itself into "books", each of which store _journal entries_ and their child _transactions_. The cardinal rule of double-entry accounting is that "for every debit entry, there must be a corresponding credit entry" which means "everything must balance out to zero", and that rule is applied to every journal entry written to the book. If the transactions for a journal entry do not balance out to zero, the system will throw a new error with the message `INVALID JOURNAL`.
 
-Books simply represent the physical book in which you would record your transactions - on a technical level, the "book" attribute simply is added as a key-value pair to both the `Medici_Transactions` and `Medici_Journals` collection to allow you to have multiple books if you want to.
+Books simply represent the physical book in which you would record your transactions - on a technical level, the "book" attribute simply is added as a key-value pair to both the `medici_transactions` and `medici_journals` tables to allow you to have multiple books if you want to.
 
 Each transaction in Medici is for one account. Additionally, sub accounts can be created, and are separated by a colon. Transactions to the Assets:Cash account will appear in a query for transactions in the Assets account, but will not appear in a query for transactions in the Assets:Property account. This allows you to query, for example, all expenses, or just "office overhead" expenses (Expenses:Office Overhead).
 
@@ -44,7 +51,7 @@ const myBook = new Book("MyBook", { precision: 7 });
 Writing a journal entry is very simple. First you need a `book` object:
 
 ```js
-const { Book } = require("medici");
+const { Book } = require("medici-sql");
 
 // The first argument is the book name, which is used to determine which book the transactions and journals are queried from.
 const myBook = new Book("MyBook");
@@ -103,37 +110,19 @@ const { results, total } = await myBook.ledger({
 });
 ```
 
-## Customizing `readConcern` for Reads
+## Read preferences, read concerns, and hints (accepted, ignored)
 
-Medici supports passing a custom MongoDB `readConcern` level when performing read operations such as `.balance()` or `.ledger()`. This is especially important when you're using MongoDB in a replica set configuration, where consistency and availability trade-offs must be considered.
-
-#### Example:
+The options type `IOptions` still accepts `readPreference`, `readConcern`, and `hint` on `book.balance()`, `book.ledger()`, `book.void()`, `book.listAccounts()`, and `entry.commit()` — they are **accepted and ignored**. There is a single SQLite file: no secondaries, no replica set, nothing to route reads to. Passing these options is harmless and keeps code written for upstream medici working unchanged.
 
 ```js
+// Accepted, ignored.
 const { balance } = await myBook.balance(
   { account: "Assets:Cash" },
-  { readConcern: "local" } // Options: "local", "majority", "available", etc.
+  { readConcern: "local" } // no-op: there is no replica set
 );
 ```
 
-```js
-const { results, total } = await myBook.ledger(
-  { account: "Income" },
-  { readConcern: "local" }
-);
-```
-
-#### ⚠️ Important Note on `readConcern: "majority"`
-
-Using `readConcern: "majority"` in production has led to serious issues in MongoDB replica set environments, including:
-
-- Negative balances appearing unexpectedly  
-- Recently credited transactions missing from balance queries  
-- Inconsistent ledger reads during failovers or secondary lag  
-
-These issues are caused by delays in replica set propagation, where majority-acknowledged reads may not reflect the latest writes. Since Medici relies on up-to-date read accuracy to maintain ledger integrity, stale reads can break fundamental accounting guarantees.
-
-Switching to `readConcern: "local"` resolved all issues by ensuring reads are performed from the primary node, even if they are not yet acknowledged by the majority.
+The `writeConcern: { w: 1, j: true }` object that upstream passes to its write operations when no session is given is accepted and ignored the same way — a SQLite write inside `connection.transaction` commits atomically on resolve and rolls back on throw, which is the guarantee `writeConcern` was standing in for.
 
 ## Voiding Journal Entries
 
@@ -153,10 +142,10 @@ By default, voided journals will have the `datetime` set to the current date and
 
 ## ACID checks of an account balance
 
-Sometimes you need to guarantee that an account balance never goes negative. You can employ MongoDB ACID transactions for that. As of 2022 the recommended way is to use special Medici writelock mechanism. See comments in the code example below.
+Sometimes you need to guarantee that an account balance never goes negative. You can employ SQLite transactions for that, through the same `mongoTransaction` helper (the name is kept for compatibility — in this port it wraps `connection.transaction`, which runs a Prisma interactive transaction on the SQLite database). The recommended way is still the Medici writelock mechanism. See comments in the code example below.
 
 ```typescript
-import { Book, mongoTransaction } from "medici";
+import { Book, mongoTransaction } from "medici-sql";
 
 const mainLedger = new Book("mainLedger");
 
@@ -198,9 +187,11 @@ async function withdraw(walletId: string, amount: number) {
 }
 ```
 
+> **SQLite retry semantics (read this before using `mongoTransaction`).** On write contention the callback is retried (default 5 attempts, exponential backoff with jitter — see `MIGRATION_GUIDE.md` → "Concurrency"). The retry is only safe if the `Entry` is constructed **inside** the callback, so its ObjectIds are regenerated on every attempt. An `Entry` built outside the callback and committed inside will hit a duplicate-`_id` violation on the second attempt, which the port surfaces as a named `TransactionIdReuseError` (with the original constraint violation attached as `cause`), not a raw database error. Pinned behaviour: `spec/transaction.spec.ts` ("surfaces a named error when an outside-constructed id is reinserted on retry (QA S6)", "rethrows the original error after exhausting retries").
+
 ## Document Schema
 
-Journals are schemed in Mongoose as follows:
+Journals are stored with the following shape (field names match the SQLite tables):
 
 ```js
 JournalSchema = {
@@ -257,10 +248,12 @@ Note that the `book`, `datetime`, `memo`, `voided`, and `void_reason` attributes
 
 If you need to add additional fields to the schema that the `meta` won't satisfy, you can define your own schema for `Medici_Transaction` and utilise the `setJournalSchema` and `setTransactionSchema` to use those schemas. When you specify meta values when querying or writing transactions, the system will check the Transaction schema to see if those values correspond to actual top-level fields, and if so will set those instead of the corresponding `meta` field.
 
-For example, if you want transactions to have a related "person" document, you can define the transaction schema like so and use setTransactionSchema to register it:
+For example, if you want transactions to have a related "person" document, you can define the transaction schema like so and use setTransactionSchema to register it. The `Schema`/`Types` classes come from the built-in mongoose compatibility layer shipped with the package (the package itself has no Mongoose dependency):
 
 ```js
-MyTransactionSchema = {
+const { Schema } = require("medici-sql/build/compat/mongoose");
+
+MyTransactionSchema = new Schema({
   _person: {
     type: Schema.Types.ObjectId,
     ref: "Person",
@@ -283,7 +276,7 @@ MyTransactionSchema = {
     default: false,
   },
   void_reason: String,
-};
+});
 
 // add an index to the Schema
 MyTransactionSchema.index({ void: 1, void_reason: 1 });
@@ -295,11 +288,13 @@ setTransactionSchema(MyTransactionSchema, undefined, { defaultIndexes: true });
 await syncIndexes({ background: false });
 ```
 
+Note: in this port `syncIndexes()` is near-inert — Prisma owns the DDL (`prisma/schema.prisma`), and `syncIndexes`/`diffIndexes` exist to keep the upstream call pattern working, not to create indexes. Create the index in `prisma/schema.prisma` (`npm run db:push`) or with plain SQL (see "Indexes" below). Custom top-level fields registered through `setTransactionSchema` are persisted inside the `meta` column and read back as top-level fields; see `MIGRATION_GUIDE.md` → "Custom schema fields".
+
 ## Performance
 
 ### Fast balance
 
-In medici v5 we introduced the so-called "fast balance" feature. [Here is the discussion](https://github.com/flash-oss/medici/issues/38). TL;DR: it caches `.balance()` call result once a day (customisable) to `medici_balances` collection.
+In medici v5 we introduced the so-called "fast balance" feature. [Here is the discussion](https://github.com/flash-oss/medici/issues/38). TL;DR: it caches `.balance()` call result once a day (customisable) to the `medici_balances` table.
 
 If a database has millions of records then calculating the balance on half of them would take like 5 seconds. When this result is cached it takes few milliseconds to calculate the balance after that.
 
@@ -307,7 +302,7 @@ If a database has millions of records then calculating the balance on half of th
 
 There are two hard problems in programming: cache invalidation and naming things. (C) Phil Karlton
 
-Be default, when you call `book.blanace(...)` for the first time medici will cache its result to `medici_balances` (aka balance snapshot). By default, every doc there will be auto-removed as they have TTL of 48 hours. Meaning this cache will definitely expire in 2 days. Although, medici will try doing a second balance snapshot every 24 hours (default value). Thus, at any point of time there will be present from zero to two snapshots per balance query.
+By default, when you call `book.balance(...)` for the first time medici will cache its result to `medici_balances` (aka balance snapshot). **In this port the snapshots are not auto-removed.** Upstream expires them via a MongoDB TTL index (48 hours by default); SQLite has no TTL and this port ships no sweeper, so the `expireAt` column is written but never enforced (the mechanics are unchanged — a second snapshot is attempted every 24 hours by default, so at any point there are zero to two snapshots per balance query — but old rows accumulate). The operator owns cleanup; `MIGRATION_GUIDE.md` → "TTL indexes are not enforced" has sample `DELETE` statements. Snapshot selection picks the most recent snapshot by `_id`, so unexpired-vs-expired rows make no difference to correctness.
 
 When you would call the `book.balance(...)` with the same exact arguments the medici will:
 
@@ -319,7 +314,7 @@ In a rare case you wanted to remove some ledger entries from `medici_transaction
 
 **IMPORTANT!**
 
-To make this feature consistent we had to switch from client-generated IDs to MongoDB server generated IDs. See [forceServerObjectId](https://mongodb.github.io/node-mongodb-native/api-generated/mongoclient.html#constructor).
+Upstream made this feature consistent by switching from client-generated IDs to MongoDB server-generated IDs (`forceServerObjectId`). This port reproduces the same guarantee without a MongoDB: transaction `_id`s are allocated from a database-backed monotonic sequence (`medici_id_sequence`) **inside the write transaction** (`prisma/schema.prisma`, `docs/PORTING-NOTES.md` → "id sequence"). Within one writer process, transactions are serialized, so allocation order matches commit order. The residual hazard is identical to upstream's, not a regression: **allocation order is not commit order in general** — a transaction that allocated an id earlier may commit later (for example after a retry), so do not treat a larger `_id` as strictly "newer" across failed-and-retried writes. Journal, lock, and balance `_id`s remain client-generated `bson` ObjectIds. The `forceServerObjectId` option, if passed, is accepted and ignored. Pinned behaviour: `spec/transaction.spec.ts` ("allocates transaction ids from medici_id_sequence inside the write tx (QA M3)").
 
 #### How to disable balance caching feature
 
@@ -331,60 +326,31 @@ const myBook = new Book("MyBook", { balanceSnapshotSec: 0 })
 
 ### Indexes
 
-Medici adds a few **default** indexes on the `medici_transactions` collection:
+Prisma owns the DDL in this port. The default index set, as declared in `prisma/schema.prisma`:
 
-```
-    "_journal": 1
-```
+- `medici_transactions`: `_id` (primary key), `_journal`, `book + accounts + datetime`, `book + account_path_0 + account_path_1 + account_path_2 + datetime`
+- `medici_locks`: `(account, book)` (unique — `writelockAccounts` upserts by that key)
+- `medici_balances`: `key`
 
-```
-    "book": 1,
-    "accounts": 1,
-    "datetime": -1,
-```
+The upstream `syncIndexes()` call pattern still works but is near-inert (it validates the schema is present; it does not create or drop indexes), and `diffIndexes()` does not report meaningful diffs. To add an index for `meta`-heavy queries, either add it to `prisma/schema.prisma` and run `npm run db:push`, or create it directly. `meta` is a JSON TEXT column, so target the key with an expression index:
 
-```
-    "book": 1,
-    "account_path.0": 1,
-    "account_path.1": 1,
-    "account_path.2": 1,
-    "datetime": -1,
+```sql
+CREATE INDEX idx_book_account_clientid
+  ON medici_transactions (book, accounts, datetime);
+
+CREATE INDEX idx_book_clientid
+  ON medici_transactions (book, json_extract(meta, '$.clientId'), datetime);
 ```
 
-However, if you are doing lots of queries using the `meta` data you probably would want to add the following index(es):
+## Testing against upstream
 
-```
-    "book": 1,
-    "accounts": 1,
-    "meta.myClientId": 1,
-    "datetime": -1,
-```
-
-and/or
-
-```
-    "book": 1,
-    "meta.myClientId": 1,
-    "account_path.0": 1,
-    "account_path.1": 1,
-    "account_path.2": 1,
-    "datetime": -1,
-```
-
-Here is how to add an index manually via MongoDB CLI or other tool:
-
-```
-db.getSiblingDB("my_db_name").getCollection("medici_transactions").createIndex({
-    "book": 1,
-    "accounts": 1,
-    "meta.myClientId": 1,
-    "datetime": -1,
-}, { background: true })
-```
-
-For more information, see [Performance Best Practices: Indexing](https://www.mongodb.com/blog/post/performance-best-practices-indexing)
+This port runs the upstream spec suite against the SQLite backend. `TEST_COMPAT_MATRIX.md` is the authoritative answer to "which upstream tests are client-facing and how each one maps here" (tier A/B executed, tier C quarantined with reason). `upstream/RECONCILING.md` documents the upstream pin (`54fa40b`, `v7.3.0-1-g54fa40b`) and the drift-check procedure (`npm run upstream:check`).
 
 ## Changelog
+
+### medici-sql (this port)
+
+API-compatible SQL (Prisma/SQLite) port of `flash-oss/medici`, tracking upstream `v7.3.0-1-g54fa40b` (pin `54fa40b`). No upstream export is renamed or removed; `MIGRATION_GUIDE.md` lists what changes and what deliberately does not. The upstream history below is kept verbatim.
 
 ### 7.4
 
