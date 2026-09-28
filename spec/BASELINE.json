@@ -1,6 +1,6 @@
 {
   "format": "medici-sql/test-results/v1",
-  "generatedAt": "2026-09-27T22:48:40.586Z",
+  "generatedAt": "2026-09-27T23:51:45.717Z",
   "perFile": {
     "spec/alias-probe.spec.ts": {
       "passed": 1,
@@ -8,13 +8,13 @@
       "pending": 0
     },
     "spec/balance.spec.ts": {
-      "passed": 8,
-      "failed": 1,
+      "passed": 9,
+      "failed": 0,
       "pending": 0
     },
     "spec/book.spec.ts": {
-      "passed": 53,
-      "failed": 2,
+      "passed": 55,
+      "failed": 0,
       "pending": 1
     },
     "spec/collectionAdapter.spec.ts": {
@@ -43,7 +43,7 @@
       "pending": 0
     },
     "spec/filterTranslator.spec.ts": {
-      "passed": 80,
+      "passed": 81,
       "failed": 0,
       "pending": 0
     },
@@ -98,16 +98,16 @@
       "pending": 0
     },
     "spec/xacid.spec.ts": {
-      "passed": 1,
-      "failed": 11,
+      "passed": 12,
+      "failed": 0,
       "pending": 0
     }
   },
   "totals": {
-    "passed": 316,
-    "failed": 14,
+    "passed": 331,
+    "failed": 0,
     "pending": 2,
-    "executed": 330
+    "executed": 331
   },
   "quarantined": [
     "spec/book.spec.ts :: should save all transactions in bulk and mitigate mongodb 'insertedIds' bug",

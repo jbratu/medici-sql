@@ -17,15 +17,16 @@
     "prettier": "prettier '**/*.ts' --check",
     "prettier:fix": "prettier '**/*.ts' --write",
     "test": "npm run test:code && npm run test:types",
-    "test:code": "ts-mocha --paths --require ./test/mocha-setup.ts --recursive './spec/*.ts' --preserve-symlinks",
+    "test:code": "ts-mocha --paths --require ./test/mocha-setup.ts --recursive './spec/*.ts' './spec/sql/*.ts' --preserve-symlinks",
     "test:types": "tsd",
-    "test:coverage": "npm run clean && nyc --reporter html ts-mocha --paths --require ./test/mocha-setup.ts --recursive './spec/**/*.spec.ts'",
+    "test:coverage": "npm run clean && nyc --reporter html ts-mocha --paths --require ./test/mocha-setup.ts --recursive './spec/*.ts' './spec/sql/*.ts' --preserve-symlinks",
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:reset": "prisma db push --force-reset",
     "db:sync-ddl": "node scripts/sync-ddl.mjs",
     "upstream:check": "node scripts/upstream-check.mjs",
     "upstream:baseline": "node scripts/upstream-baseline.mjs",
+    "smoke:packaged": "node scripts/smoke-packaged.mjs",
     "prepublishOnly": "npm run build"
   },
   "files": [

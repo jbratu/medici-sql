@@ -20,3 +20,10 @@ jobs:
       # script inside `npm run ci` (build + test).
       - run: npm ci
       - run: npm run ci
+
+      # G8 (QA amendment, ITD-94 item 2): the published-artifact gate —
+      # npm pack, install the tarball with no mongoose present, run the
+      # client-facing smoke against build/index.js, tsc a consumer against
+      # types/index.d.ts, and assert no "mongoose" specifier survives.
+      - name: Packaging smoke (G8)
+        run: npm run smoke:packaged

@@ -706,8 +706,16 @@ const edgeRows: EdgeRow[] = [
     expected: { where: "meta IS NULL", params: [] },
   },
   {
-    name: "meta non-object throws",
-    filter: { meta: "x" },
+    // book.spec.ts:346/370 query the balance model with
+    // `meta: JSON.stringify({...})` — exact equality against the stored raw
+    // JSON text, faithful to Mongo's Mixed-field string equality.
+    name: "meta exact string matches the stored raw JSON text",
+    filter: { meta: '{"clientId":"12345"}' },
+    expected: { where: "meta = ?", params: ['{"clientId":"12345"}'] },
+  },
+  {
+    name: "meta non-string non-object throws",
+    filter: { meta: 42 },
     expected: { error: 'value for field "meta" must be an object or null' },
   },
   {

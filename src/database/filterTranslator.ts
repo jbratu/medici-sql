@@ -202,6 +202,13 @@ function translateJsonRoot(
 ): string[] {
   const value = filter[root];
   if (value === null || value === undefined) return [`${root} IS NULL`];
+  if (typeof value === "string") {
+    // Exact match against the stored raw JSON text (book.spec.ts:346/370
+    // query `meta: JSON.stringify({...})` — the column stores exactly that
+    // string, so a raw comparison is the faithful Mongo equality).
+    params.push(value);
+    return [`${root} = ?`];
+  }
   if (!isPlainObject(value)) {
     throw new UnsupportedMongoOperationError(`value for field "${root}" must be an object or null`);
   }
@@ -297,6 +304,16 @@ function translateValue(expr: string, key: string, value: unknown, kind: ColumnK
     if (kind === "objectId") return objectClause(expr, key, value, params);
     throw new UnsupportedMongoOperationError(`object value is not supported for field "${key}"`);
   }
+  if (
+    kind === "objectId" &&
+    value !== null &&
+    typeof value === "object" &&
+    !(value instanceof Date)
+  ) {
+    // Class instances (a hydrated Document, or an ObjectId subclass) are
+    // not "plain" objects but still cast to their hex id here.
+    return objectClause(expr, key, value as IAnyObject, params);
+  }
   params.push(coerceScalar(value, key, kind));
   return `${expr} = ?`;
 }
@@ -307,6 +324,13 @@ function translateValue(expr: string, key: string, value: unknown, kind: ColumnK
  * mirroring mongoose's silent cast.
  */
 function objectClause(expr: string, key: string, value: IAnyObject, params: unknown[]): string {
+  // An ObjectId (or subclass) passed by value: our compat subclass carries
+  // `_id` === self, but a bare bson ObjectId has no `_id` at all — when the
+  // value itself renders hex, prefer that over the `_id` indirection.
+  if (typeof (value as { toHexString?: unknown }).toHexString === "function") {
+    params.push(coerceObjectIdScalar(value, key));
+    return `${expr} = ?`;
+  }
   const id = value._id;
   if (id === null || id === undefined) {
     throw new UnsupportedMongoOperationError(

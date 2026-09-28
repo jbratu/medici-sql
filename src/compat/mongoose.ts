@@ -603,11 +603,17 @@ export function model<T = any>(name: string, schema?: Schema, collection?: strin
   return CompatModelConstructor as unknown as Model<T>;
 }
 
+// The "mongoose"-shaped connection: the model registry (`models` /
+// `deleteModel` / `model`) plus the port's transaction boundary (ITD-102,
+// src/database/connection). The transaction-bound members are bound lazily —
+// a top-level import of ../database/connection would create a runtime cycle
+// (connection → sqlCollection → this module), the same reason the model
+// collection getter above uses `require`.
 export const connection: {
   models: Record<string, any>;
   deleteModel(name: string): any;
   model: typeof model;
-} = {
+} & typeof import("../database/connection")["connection"] = {
   models: {},
   deleteModel(name) {
     const m = connection.models[name];
@@ -615,6 +621,31 @@ export const connection: {
     return m;
   },
   model,
+  get transaction() {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    return dbConnection.transaction.bind(dbConnection) as any;
+  },
+  get connect() {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    return dbConnection.connect.bind(dbConnection) as any;
+  },
+  get disconnect() {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    return dbConnection.disconnect.bind(dbConnection) as any;
+  },
+  get collection() {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    return dbConnection.collection.bind(dbConnection) as any;
+  },
+  get db() {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { connection: dbConnection } = require("../database/connection") as typeof import("../database/connection");
+    return dbConnection.db;
+  },
 };
 
 /**
